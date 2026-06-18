@@ -1,0 +1,20 @@
+{
+  "source_app": "codex",
+  "source_type": "manual_export",
+  "conversation_id": "codex-sample-20260617-002",
+  "message_time": "2026-06-17T21:45:00+08:00",
+  "project": "AI对话知识沉淀系统",
+  "topic": "手动导入 JSON 示例",
+  "raw_path": "raw/imports/codex/示例记录.json",
+  "raw_source": "手动示例记录",
+  "messages": [
+    {
+      "role": "user",
+      "content": "请把监督问题拆成可以执行的 spec 修复项。"
+    },
+    {
+      "role": "assistant",
+      "content": "我会先保持 P0 待确认，不进入编码，然后补齐字段边界、阶段边界和 AI 输入策略。"
+    }
+  ]
+}
