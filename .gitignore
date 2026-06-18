@@ -27,6 +27,19 @@ coverage/
 *.sqlite3
 *.db-shm
 *.db-wal
+
+# 原始导入和知识库默认视为用户本地数据，只提交占位和明确示例
+raw/imports/**
+!raw/imports/
+!raw/imports/**/
+!raw/imports/**/.gitkeep
+!raw/imports/codex/示例记录.md
+!raw/imports/codex/示例记录.json
+knowledge/**
+!knowledge/
+!knowledge/**/
+!knowledge/**/.gitkeep
+
 logs/*
 !logs/.gitkeep
 data/runtime/*
