@@ -16,6 +16,7 @@
     "typescript": "^6.0.2"
   },
   "dependencies": {
-    "better-sqlite3": "^12.11.1"
+    "better-sqlite3": "^12.11.1",
+    "yaml": "^2.9.0"
   }
 }
