@@ -21,13 +21,19 @@ export interface RawSourceDocument extends SourceCandidate {
 }
 
 export interface SourceConnectorListInput {
+  vault_root: string;
   import_root: VaultRelativePath;
   since?: IsoDateTimeString;
 }
 
+export interface SourceConnectorReadInput {
+  vault_root: string;
+  candidate: SourceCandidate;
+}
+
 export interface SourceConnector {
   readonly source_app: SourceApp;
-  readonly supported_source_types: SourceType[];
+  readonly supported_source_types: readonly SourceType[];
   listCandidates(input: SourceConnectorListInput): Promise<SourceCandidate[]>;
-  read(candidate: SourceCandidate): Promise<RawSourceDocument>;
+  read(input: SourceConnectorReadInput): Promise<RawSourceDocument>;
 }
