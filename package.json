@@ -1,0 +1,16 @@
+{
+  "name": "ai-chat-knowledge-system",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local-first core for turning AI chat records into reviewable knowledge atoms.",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.2"
+  }
+}
