@@ -177,6 +177,14 @@ export class SQLiteNormalizedRecordStore implements NormalizedRecordStorageProvi
       clauses.push("can_enter_personal_kb = 1");
     }
 
+    if (query.record_ids && query.record_ids.length > 0) {
+      const placeholders = query.record_ids.map((_, index) => `@record_id_${index}`).join(", ");
+      clauses.push(`record_id IN (${placeholders})`);
+      for (const [index, recordId] of query.record_ids.entries()) {
+        params[`record_id_${index}`] = recordId;
+      }
+    }
+
     const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
     const rows = this.db
       .prepare(`SELECT * FROM normalized_records ${where} ORDER BY message_time ASC, turn_index ASC`)

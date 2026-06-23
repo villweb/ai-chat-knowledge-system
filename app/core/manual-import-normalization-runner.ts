@@ -23,6 +23,8 @@ export interface ManualImportNormalizationInput {
   run_date?: string;
   // UI 手动选文件导入时，未标注 sensitivity 的记录默认视为 personal
   default_sensitivity_when_missing?: Sensitivity;
+  // 仅处理指定 raw_path，避免重复处理 imports 目录中的历史文件
+  only_raw_paths?: VaultRelativePath[];
   raw_imports_dir?: VaultRelativePath;
   sqlite_path?: VaultRelativePath;
   knowledge_dir?: VaultRelativePath;
@@ -83,8 +85,14 @@ export async function runManualImportNormalization(
       vault_root: input.vault_root,
       import_root: paths.raw_imports_dir
     });
+    const onlyRawPathSet = input.only_raw_paths && input.only_raw_paths.length > 0
+      ? new Set(input.only_raw_paths)
+      : null;
+    const targetCandidates = onlyRawPathSet
+      ? candidates.filter((candidate) => onlyRawPathSet.has(candidate.raw_path))
+      : candidates;
 
-    for (const candidate of candidates) {
+    for (const candidate of targetCandidates) {
       try {
         const document = await connector.read({
           vault_root: input.vault_root,
@@ -189,24 +197,19 @@ function buildWorkspacePaths(input: ManualImportNormalizationInput): WorkspacePa
 function buildP1PendingKnowledgeAtom(record: NormalizedRecord): KnowledgeAtom {
   const createdAt = record.message_time === "unknown" ? record.created_at : record.message_time;
   const evidence = truncateText(record.user_message, 120);
+  const isPersonalEssay = record.ai_message.trim().length === 0;
 
   return {
     schema_version: SCHEMA_VERSION.knowledgeAtom,
     atom_id: createAtomId(record),
     title: buildPendingAtomTitle(record),
-    type: "素材",
-    content: [
-      "这是一条 P1 固定示例候选卡片，用于验证导入记录能够进入待确认区。",
-      "",
-      `待确认素材：用户在「${record.topic}」中提出了一条需要人工判断是否沉淀的对话内容。`,
-      "",
-      "后续 P2 会由 AI 根据完整上下文提炼真实观点、方法、经验或问题。"
-    ].join("\n"),
+    type: isPersonalEssay ? "观点" : "素材",
+    content: buildPendingAtomContent(record),
     source_app: record.source_app,
     source_record_ids: [record.record_id],
     source_raw_paths: [record.raw_archive_path],
     project: record.project,
-    tags: ["P1验证", "AI对话"],
+    tags: isPersonalEssay ? ["个人随笔", record.source_app] : ["AI对话", record.source_app],
     sensitivity: record.sensitivity,
     review_status: "pending",
     evidence,
@@ -214,6 +217,20 @@ function buildP1PendingKnowledgeAtom(record: NormalizedRecord): KnowledgeAtom {
     created_at: createdAt,
     updated_at: record.updated_at
   };
+}
+
+function buildPendingAtomContent(record: NormalizedRecord): string {
+  if (record.ai_message.trim().length === 0) {
+    return record.user_message.trim();
+  }
+
+  return [
+    "【用户消息】",
+    record.user_message.trim(),
+    "",
+    "【AI 回复】",
+    record.ai_message.trim()
+  ].join("\n");
 }
 
 function createAtomId(record: NormalizedRecord): string {

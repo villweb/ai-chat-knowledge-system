@@ -201,6 +201,7 @@ interface PipelineState {
 interface ImportResult {
   copied_file_count?: number;
   copied_file_names?: string[];
+  copied_raw_paths?: string[];
   source_app?: string;
   import_path?: string;
   auto_processed?: boolean;
@@ -211,6 +212,8 @@ interface ImportResult {
   failed_file_count?: number;
   blocked_record_count?: number;
   used_personal_default?: boolean;
+  import_batch_atom_ids?: string[];
+  import_batch_record_ids?: string[];
 }
 
 interface ReleaseState {
@@ -836,6 +839,7 @@ function App() {
     }
   });
   const [hasInitializedNav, setHasInitializedNav] = useState(false);
+  const [importBatchAtomIds, setImportBatchAtomIds] = useState<string[]>([]);
 
   useEffect(() => {
     void refresh();
@@ -914,8 +918,13 @@ function App() {
     const blocked = result.blocked_record_count ?? 0;
 
     let message = `已导入 ${names} 到 ${importPath}，并完成自动提炼。`;
+    const batchCount = result.import_batch_atom_ids?.length ?? 0;
     if (pending > 0) {
-      message += `${pending} 条知识在「待确认」等待审查。`;
+      if (batchCount > 0) {
+        message += ` 本次导入产生 ${batchCount} 条待确认，已在列表中高亮。`;
+      } else {
+        message += `${pending} 条知识在「待确认」等待审查。`;
+      }
       return message;
     }
 
@@ -930,7 +939,7 @@ function App() {
         message += ` 已标准化 ${normalized} 条记录，但未生成候选知识：文件未标记 sensitivity: personal，或内容被敏感规则阻断。`;
       }
     } else if (normalized === 0 && failed === 0) {
-      message += " 未能从文件中解析出有效对话记录，请确认格式包含「用户消息」和「AI 回复」章节。";
+      message += " 未能从文件中解析出有效内容，请确认文件格式。";
     }
     return message;
   }
@@ -963,7 +972,12 @@ function App() {
         return;
       }
       setNotice(formatImportSuccess(result));
+      setImportBatchAtomIds(result.import_batch_atom_ids ?? []);
       await refresh();
+      const firstBatchAtomId = result.import_batch_atom_ids?.[0];
+      if (firstBatchAtomId) {
+        setSelectedId(firstBatchAtomId);
+      }
       if ((result.pending_atom_count ?? 0) > 0) {
         setActive("pending");
       }
@@ -1122,8 +1136,10 @@ function App() {
             counts={counts}
             query={query}
             selectedId={selected?.atom.atom_id ?? ""}
+            importBatchAtomIds={importBatchAtomIds}
             onQuery={setQuery}
             onSelect={(atomId) => { setSelectedId(atomId); setActive("detail"); }}
+            onClearImportBatch={() => setImportBatchAtomIds([])}
           />
         )}
         {active === "detail" && selected && <DetailPanel document={selected} atoms={state.atoms} busy={busy} onUpdate={(input) => withBusy(() => desktopApi.updateAtom(input), "知识已更新")} />}
@@ -1699,17 +1715,22 @@ function PendingPanel({
   counts,
   query,
   selectedId,
+  importBatchAtomIds,
   onQuery,
-  onSelect
+  onSelect,
+  onClearImportBatch
 }: {
   atoms: KnowledgeAtomDocument[];
   counts: Record<ReviewStatus, number>;
   query: string;
   selectedId: string;
+  importBatchAtomIds: string[];
   onQuery: (value: string) => void;
   onSelect: (atomId: string) => void;
+  onClearImportBatch: () => void;
 }) {
   const [statusFilter, setStatusFilter] = useState<ReviewStatus>("pending");
+  const [onlyCurrentImport, setOnlyCurrentImport] = useState(importBatchAtomIds.length > 0);
 
   const statusTabs: Array<{ key: ReviewStatus; label: string; count: number }> = [
     { key: "pending", label: "待确认", count: counts.pending },
@@ -1718,10 +1739,15 @@ function PendingPanel({
     { key: "merged", label: "已合并", count: counts.merged }
   ];
 
+  const importBatchSet = useMemo(() => new Set(importBatchAtomIds), [importBatchAtomIds]);
+
   const filteredAtoms = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    return atoms.filter((item) => {
+    const items = atoms.filter((item) => {
       if (item.atom.review_status !== statusFilter) {
+        return false;
+      }
+      if (onlyCurrentImport && importBatchSet.size > 0 && !importBatchSet.has(item.atom.atom_id)) {
         return false;
       }
       if (!needle) {
@@ -1733,7 +1759,17 @@ function PendingPanel({
         .toLowerCase()
         .includes(needle);
     });
-  }, [atoms, query, statusFilter]);
+
+    if (importBatchSet.size === 0) {
+      return items;
+    }
+
+    return [...items].sort((left, right) => {
+      const leftInBatch = importBatchSet.has(left.atom.atom_id) ? 0 : 1;
+      const rightInBatch = importBatchSet.has(right.atom.atom_id) ? 0 : 1;
+      return leftInBatch - rightInBatch;
+    });
+  }, [atoms, importBatchSet, onlyCurrentImport, query, statusFilter]);
 
   return (
     <section className="panel fill">
@@ -1750,13 +1786,40 @@ function PendingPanel({
             </button>
           ))}
         </div>
+        {importBatchAtomIds.length > 0 && (
+          <div className="importBatchBar">
+            <button
+              type="button"
+              className={onlyCurrentImport ? "statusPill active" : "statusPill"}
+              onClick={() => setOnlyCurrentImport(true)}
+            >
+              本次导入 {importBatchAtomIds.length}
+            </button>
+            <button type="button" className={!onlyCurrentImport ? "statusPill active" : "statusPill"} onClick={() => setOnlyCurrentImport(false)}>
+              全部待确认
+            </button>
+            <button type="button" className="statusPill" onClick={onClearImportBatch}>
+              清除筛选
+            </button>
+          </div>
+        )}
         <label className="search"><Search size={16} /><input value={query} onChange={(event) => onQuery(event.target.value)} placeholder="搜索标题、正文、证据" /></label>
       </div>
       <div className="atomList">
         {filteredAtoms.map((item) => (
-          <button key={item.atom.atom_id} className={selectedId === item.atom.atom_id ? "atomRow active" : "atomRow"} onClick={() => onSelect(item.atom.atom_id)}>
+          <button
+            key={item.atom.atom_id}
+            className={[
+              selectedId === item.atom.atom_id ? "atomRow active" : "atomRow",
+              importBatchSet.has(item.atom.atom_id) ? "importBatch" : ""
+            ].filter(Boolean).join(" ")}
+            onClick={() => onSelect(item.atom.atom_id)}
+          >
             <strong>{item.atom.title}</strong>
-            <span>{item.atom.type} · {item.atom.review_status} · {item.atom.source_app}</span>
+            <span>
+              {importBatchSet.has(item.atom.atom_id) && <em className="importBatchTag">本次导入</em>}
+              {item.atom.type} · {item.atom.review_status} · {item.atom.source_app}
+            </span>
             <small>{item.atom.evidence}</small>
           </button>
         ))}

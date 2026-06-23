@@ -180,10 +180,12 @@ function registerIpc() {
     const targetDir = path.join(state.vaultRoot, importPath);
     await mkdir(targetDir, { recursive: true });
     const copiedNames = [];
+    const copiedRawPaths = [];
     for (const file of result.filePaths) {
       const fileName = path.basename(file);
       await copyFile(file, path.join(targetDir, fileName));
       copiedNames.push(fileName);
+      copiedRawPaths.push(`${importPath}/${fileName}`);
     }
 
     pipelinePhase = "importing";
@@ -191,11 +193,18 @@ function registerIpc() {
 
     try {
       pipelinePhase = "processing";
-      const pipelineResult = await runDailyWorkflow(undefined, undefined, { uiManualImport: true });
+      const pipelineResult = await runDailyWorkflow(undefined, undefined, {
+        uiManualImport: true,
+        copiedRawPaths
+      });
       const atoms = await listAtoms();
       const pendingCount = atoms.filter((item) => item.atom.review_status === "pending").length;
       const importSummary = parseScriptStdout(pipelineResult.importResult);
       const extractSummary = parseScriptStdout(pipelineResult.extractResult);
+      const importBatchAtomIds = Array.from(new Set([
+        ...(importSummary?.generated_atom_ids ?? []),
+        ...(extractSummary?.generated_atom_ids ?? [])
+      ]));
       pipelinePhase = pendingCount > 0 ? "waiting_review" : "done";
       pushEvent(
         "import_pipeline_completed",
@@ -204,6 +213,7 @@ function registerIpc() {
       return {
         copied_file_count: result.filePaths.length,
         copied_file_names: copiedNames,
+        copied_raw_paths: copiedRawPaths,
         source_app: targetSource,
         import_path: importPath,
         auto_processed: true,
@@ -216,6 +226,8 @@ function registerIpc() {
         ),
         failed_file_count: importSummary?.failed_file_count ?? 0,
         blocked_record_count: extractSummary?.blocked_record_count ?? 0,
+        import_batch_atom_ids: importBatchAtomIds,
+        import_batch_record_ids: importSummary?.normalized_record_ids ?? [],
         used_personal_default: true,
         pipeline: getPipelineState(),
         ...pipelineResult
@@ -640,6 +652,11 @@ async function runDailyWorkflow(runDate, runIdPrefix, options = {}) {
   ];
   if (options.uiManualImport) {
     importArgs.push("--default-sensitivity-missing", "personal");
+    if (options.copiedRawPaths?.length) {
+      for (const rawPath of options.copiedRawPaths) {
+        importArgs.push("--only-raw-path", rawPath);
+      }
+    }
   }
   const extractArgs = [
     "--source-app",
@@ -659,6 +676,13 @@ async function runDailyWorkflow(runDate, runIdPrefix, options = {}) {
   if (!importResult.ok) {
     pushEvent("daily_run", importResult.stderr);
     throw new Error(importResult.stderr || "导入失败，已停止每日运行。");
+  }
+
+  const importSummary = parseScriptStdout(importResult);
+  if (options.uiManualImport && importSummary?.normalized_record_ids?.length) {
+    for (const recordId of importSummary.normalized_record_ids) {
+      extractArgs.push("--record-id", recordId);
+    }
   }
 
   if (state.aiProvider === "openai-compatible") {

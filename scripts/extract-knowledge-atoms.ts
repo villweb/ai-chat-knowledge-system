@@ -12,6 +12,7 @@ type CliOptions = {
   source_app?: SourceApp;
   run_id?: string;
   run_date?: string;
+  record_ids?: string[];
 };
 
 const options = parseArgs(process.argv.slice(2));
@@ -23,6 +24,7 @@ console.log(JSON.stringify(summary, null, 2));
 
 function parseArgs(args: string[]): CliOptions {
   const values = new Map<string, string | true>();
+  const recordIds: string[] = [];
 
   for (let index = 0; index < args.length; index += 1) {
     const key = args[index];
@@ -30,12 +32,23 @@ function parseArgs(args: string[]): CliOptions {
       throw new Error(`Invalid argument: ${key ?? ""}`);
     }
 
+    const flag = key.slice(2);
+    if (flag === "record-id") {
+      const value = args[index + 1];
+      if (!value || value.startsWith("--")) {
+        throw new Error("Missing value for --record-id");
+      }
+      recordIds.push(value);
+      index += 1;
+      continue;
+    }
+
     const next = args[index + 1];
     if (next && !next.startsWith("--")) {
-      values.set(key.slice(2), next);
+      values.set(flag, next);
       index += 1;
     } else {
-      values.set(key.slice(2), true);
+      values.set(flag, true);
     }
   }
 
@@ -69,6 +82,9 @@ function parseArgs(args: string[]): CliOptions {
   }
   if (runDate) {
     result.run_date = String(runDate);
+  }
+  if (recordIds.length > 0) {
+    result.record_ids = recordIds;
   }
 
   return result;

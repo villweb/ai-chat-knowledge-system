@@ -723,6 +723,25 @@ nav {
   font-size: 13px;
 }
 
+.importBatchBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.atomRow.importBatch {
+  border-color: #5f9f7d;
+  box-shadow: inset 3px 0 0 #5f9f7d;
+}
+
+.importBatchTag {
+  margin-right: 8px;
+  color: #2f6f4f;
+  font-style: normal;
+  font-weight: 600;
+}
+
 .detail {
   display: grid;
   gap: 16px;
