@@ -748,6 +748,89 @@ nav {
   background: #ffffff;
 }
 
+.privacyLayout {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr);
+  gap: 16px;
+}
+
+.privacyLayout .panel {
+  min-width: 0;
+}
+
+.privacyActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.privacyActions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 38px;
+  min-width: 0;
+  padding: 0 11px;
+  border: 1px solid #d7dfdc;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #17221f;
+}
+
+.secureState,
+.scanResult {
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+  padding: 11px;
+  border: 1px solid #dce3e0;
+  border-radius: 8px;
+  background: #f7f9f8;
+}
+
+.secureState {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+}
+
+.secureState span,
+.scanResult span {
+  color: #55645f;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.sourceAuthList,
+.ruleList {
+  display: grid;
+  gap: 9px;
+  max-height: 380px;
+  overflow: auto;
+}
+
+.sourceAuthRow,
+.ruleRow {
+  display: grid;
+  gap: 5px;
+  padding: 10px 11px;
+  border: 1px solid #dce3e0;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.sourceAuthRow span,
+.sourceAuthRow small,
+.ruleRow span,
+.ruleRow small {
+  color: #64736e;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
 .settingsPanel {
   max-width: 920px;
 }
@@ -810,6 +893,7 @@ nav {
   .grid.two,
   .grid.twoWide,
   .libraryLayout,
+  .privacyLayout,
   .formGrid {
     grid-template-columns: 1fr;
   }
@@ -861,6 +945,10 @@ nav {
   }
 
   .libraryToolbar button {
+    flex: 1 1 150px;
+  }
+
+  .privacyActions button {
     flex: 1 1 150px;
   }
 }

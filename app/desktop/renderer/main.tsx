@@ -10,11 +10,14 @@ import {
   Clock,
   Database,
   Download,
+  FileText,
   FileInput,
   Filter,
   FolderOpen,
   HardDriveDownload,
+  KeyRound,
   ListChecks,
+  Lock,
   Play,
   RefreshCw,
   Search,
@@ -22,14 +25,16 @@ import {
   Shield,
   Split,
   SquarePen,
+  Trash2,
   X
 } from "lucide-react";
 import "./styles.css";
 
 type ReviewStatus = "pending" | "approved" | "rejected" | "merged";
 type KnowledgeAtomType = "观点" | "方法" | "决策" | "经验" | "素材" | "问题" | "偏好";
-type NavKey = "guide" | "sources" | "import" | "run" | "library" | "pending" | "detail" | "settings" | "logs";
+type NavKey = "guide" | "sources" | "import" | "run" | "library" | "privacy" | "pending" | "detail" | "settings" | "logs";
 type SourceConnectorStatus = "available" | "reserved";
+type RawRetentionMode = "keep_forever" | "delete_after_days" | "delete_after_successful_run";
 
 interface KnowledgeAtom {
   atom_id: string;
@@ -159,6 +164,27 @@ interface SourceConnectorView {
   failure_help: string;
 }
 
+interface PrivacySecuritySettings {
+  require_source_authorization: boolean;
+  raw_retention_mode: RawRetentionMode;
+  raw_retention_days: number;
+  allow_cloud_ai_for_private: boolean;
+  updated_at: string;
+}
+
+interface PrivacySecurityState {
+  rules: Array<{ rule_id: string; label: string; sensitivity: string; severity: string; description: string }>;
+  settings: PrivacySecuritySettings;
+  sources: Array<{ source_app: string; display_name: string; status: string; authorized: boolean; permission_scope: string; reads: string[]; does_not_read: string[]; import_path: string }>;
+  secure_credentials: { openai_compatible_saved: boolean; updated_at: string | null };
+}
+
+interface SensitiveScanResult {
+  sensitivity: string;
+  can_enter_personal_kb: boolean;
+  findings: Array<{ rule_id: string; label: string; sensitivity: string; severity: string; match_preview: string }>;
+}
+
 interface DesktopState {
   vaultRoot: string;
   sourceApp: string;
@@ -169,6 +195,7 @@ interface DesktopState {
   events: LogEvent[];
   atoms: KnowledgeAtomDocument[];
   knowledge: KnowledgeLibraryView;
+  privacy: PrivacySecurityState;
   logs: LogEvent[];
 }
 
@@ -203,6 +230,14 @@ interface DesktopApi {
   ensureObsidianCompatibility(): Promise<unknown>;
   backupKnowledge(): Promise<unknown>;
   restoreLatestKnowledgeBackup(): Promise<unknown>;
+  getPrivacyState(): Promise<PrivacySecurityState>;
+  savePrivacySettings(input: Partial<PrivacySecuritySettings>): Promise<PrivacySecurityState>;
+  scanSensitiveContent(input: { content: string }): Promise<SensitiveScanResult>;
+  applyRawRetention(): Promise<unknown>;
+  deleteSourceData(input: { source_app: string }): Promise<unknown>;
+  exportUserData(): Promise<unknown>;
+  deleteAllUserData(): Promise<unknown>;
+  writePrivacyLegalDrafts(): Promise<unknown>;
   listLogs(): Promise<LogEvent[]>;
   setConnectorEnabled(input: { sourceApp: string; enabled: boolean }): Promise<unknown>;
   getAutomationState(): Promise<DailyAutomationState>;
@@ -229,6 +264,7 @@ const navItems: Array<{ key: NavKey; label: string; icon: React.ComponentType<{ 
   { key: "import", label: "导入", icon: FileInput },
   { key: "run", label: "运行", icon: Play },
   { key: "library", label: "知识库", icon: BookOpenCheck },
+  { key: "privacy", label: "隐私", icon: Lock },
   { key: "pending", label: "待确认", icon: ListChecks },
   { key: "detail", label: "详情", icon: SquarePen },
   { key: "settings", label: "设置", icon: Settings },
@@ -290,6 +326,7 @@ function getDesktopApi(): DesktopApi {
     events: [sampleLog],
     atoms: [sampleAtom, duplicateAtom],
     knowledge: buildPreviewKnowledge([sampleAtom, duplicateAtom]),
+    privacy: buildPreviewPrivacy(),
     logs: [sampleLog]
   };
 
@@ -345,6 +382,39 @@ function getDesktopApi(): DesktopApi {
     async restoreLatestKnowledgeBackup() {
       return { backup_dir: "data/backups/preview", restored_dir_count: 4 };
     },
+    async getPrivacyState() {
+      return previewState.privacy;
+    },
+    async savePrivacySettings(input) {
+      previewState.privacy = {
+        ...previewState.privacy,
+        settings: { ...previewState.privacy.settings, ...input, updated_at: new Date().toISOString() }
+      };
+      return previewState.privacy;
+    },
+    async scanSensitiveContent(input) {
+      const hit = input.content.includes("sk-") || input.content.includes("客户");
+      return {
+        sensitivity: hit ? "confidential" : "personal",
+        can_enter_personal_kb: !hit,
+        findings: hit ? [{ rule_id: "preview", label: "预览敏感内容", sensitivity: "confidential", severity: "high", match_preview: "prev***view" }] : []
+      };
+    },
+    async applyRawRetention() {
+      return { mode: previewState.privacy.settings.raw_retention_mode, deleted_paths: [] };
+    },
+    async deleteSourceData(input) {
+      return { source_app: input.source_app, deleted_paths: [`raw/imports/${input.source_app}`] };
+    },
+    async exportUserData() {
+      return { export_dir: "data/exports/preview", copied_dir_count: 4 };
+    },
+    async deleteAllUserData() {
+      return { deleted_paths: ["knowledge", "raw", "data/runtime"] };
+    },
+    async writePrivacyLegalDrafts() {
+      return { privacy_policy_path: "legal/隐私政策草案.md", terms_path: "legal/用户协议草案.md" };
+    },
     async listLogs() {
       return previewState.logs;
     },
@@ -398,6 +468,34 @@ function getDesktopApi(): DesktopApi {
       previewState.apiKeyConfigured = Boolean(input.apiKey);
       return previewState;
     }
+  };
+}
+
+function buildPreviewPrivacy(): PrivacySecurityState {
+  const now = new Date().toISOString();
+  return {
+    rules: [
+      { rule_id: "api_key", label: "API Key 或访问令牌", sensitivity: "confidential", severity: "high", description: "识别常见密钥和令牌格式。" },
+      { rule_id: "business_private", label: "公司、客户或合同内容", sensitivity: "confidential", severity: "high", description: "识别公司项目、客户资料、合同、报价、内部资料等内容。" }
+    ],
+    settings: {
+      require_source_authorization: true,
+      raw_retention_mode: "keep_forever",
+      raw_retention_days: 30,
+      allow_cloud_ai_for_private: false,
+      updated_at: now
+    },
+    sources: buildPreviewConnectors().map((connector) => ({
+      source_app: connector.source_app,
+      display_name: connector.display_name,
+      status: connector.status,
+      authorized: connector.status === "available" && connector.enabled,
+      permission_scope: connector.permission_scope,
+      reads: connector.reads,
+      does_not_read: connector.does_not_read,
+      import_path: connector.import_path
+    })),
+    secure_credentials: { openai_compatible_saved: false, updated_at: null }
   };
 }
 
@@ -636,6 +734,20 @@ function App() {
             onRestore={() => withBusy(() => desktopApi.restoreLatestKnowledgeBackup(), "最近备份已恢复")}
           />
         )}
+        {active === "privacy" && (
+          <PrivacyPanel
+            privacy={state.privacy}
+            connectors={state.connectors}
+            busy={busy}
+            onSaveSettings={(input) => withBusy(() => desktopApi.savePrivacySettings(input), "隐私和安全设置已保存")}
+            onScan={(content) => desktopApi.scanSensitiveContent({ content })}
+            onApplyRetention={() => withBusy(() => desktopApi.applyRawRetention(), "原始记录保留策略已执行")}
+            onDeleteSource={(sourceApp) => withBusy(() => desktopApi.deleteSourceData({ source_app: sourceApp }), "来源数据已删除")}
+            onExportUserData={() => withBusy(() => desktopApi.exportUserData(), "用户数据导出完成")}
+            onDeleteAllUserData={() => withBusy(() => desktopApi.deleteAllUserData(), "本地用户数据已删除")}
+            onWriteLegalDrafts={() => withBusy(() => desktopApi.writePrivacyLegalDrafts(), "隐私政策和用户协议草案已生成")}
+          />
+        )}
         {active === "pending" && <PendingPanel atoms={filteredAtoms} counts={counts} query={query} selectedId={selected?.atom.atom_id ?? ""} onQuery={setQuery} onSelect={(atomId) => { setSelectedId(atomId); setActive("detail"); }} />}
         {active === "detail" && selected && <DetailPanel document={selected} atoms={state.atoms} busy={busy} onUpdate={(input) => withBusy(() => desktopApi.updateAtom(input), "知识已更新")} />}
         {active === "settings" && <SettingsPanel state={state} busy={busy} onSave={(input) => withBusy(() => desktopApi.saveSessionConfig(input), "会话配置已保存")} />}
@@ -663,7 +775,7 @@ function GuidePanel({ state, counts }: { state: DesktopState; counts: Record<Rev
           <li><Check size={16} />知识库位置：{compactPath(state.vaultRoot)}</li>
           <li><Check size={16} />来源：{state.sourceApp}</li>
           <li><Shield size={16} />AI 服务：{state.aiProvider}</li>
-          <li><Shield size={16} />API Key：{state.apiKeyConfigured ? "当前会话已配置" : "未保存到磁盘"}</li>
+          <li><Shield size={16} />API Key：{state.apiKeyConfigured ? "已配置" : "未配置"}</li>
         </ul>
       </section>
     </div>
@@ -923,6 +1035,90 @@ function LibraryPanel({
   );
 }
 
+function PrivacyPanel({
+  privacy,
+  connectors,
+  busy,
+  onSaveSettings,
+  onScan,
+  onApplyRetention,
+  onDeleteSource,
+  onExportUserData,
+  onDeleteAllUserData,
+  onWriteLegalDrafts
+}: {
+  privacy: PrivacySecurityState;
+  connectors: SourceConnectorView[];
+  busy: boolean;
+  onSaveSettings: (input: Partial<PrivacySecuritySettings>) => void;
+  onScan: (content: string) => Promise<SensitiveScanResult>;
+  onApplyRetention: () => void;
+  onDeleteSource: (sourceApp: string) => void;
+  onExportUserData: () => void;
+  onDeleteAllUserData: () => void;
+  onWriteLegalDrafts: () => void;
+}) {
+  const [settings, setSettings] = useState(privacy.settings);
+  const [scanText, setScanText] = useState("客户合同里出现 api_key: sk-example-secret");
+  const [scanResult, setScanResult] = useState<SensitiveScanResult | null>(null);
+  const [sourceToDelete, setSourceToDelete] = useState(connectors[0]?.source_app ?? "codex");
+
+  useEffect(() => {
+    setSettings(privacy.settings);
+  }, [privacy.settings.updated_at]);
+
+  function updateSetting<K extends keyof PrivacySecuritySettings>(key: K, value: PrivacySecuritySettings[K]) {
+    setSettings((current) => ({ ...current, [key]: value }));
+  }
+
+  return (
+    <div className="privacyLayout">
+      <section className="panel">
+        <h2>隐私和安全设置</h2>
+        <div className="formGrid">
+          <label>来源授权<select value={settings.require_source_authorization ? "yes" : "no"} onChange={(event) => updateSetting("require_source_authorization", event.target.value === "yes")}><option value="yes">需要</option><option value="no">不需要</option></select></label>
+          <label>云端 AI 处理 private<select value={settings.allow_cloud_ai_for_private ? "yes" : "no"} onChange={(event) => updateSetting("allow_cloud_ai_for_private", event.target.value === "yes")}><option value="no">禁止</option><option value="yes">允许</option></select></label>
+          <label>原始记录保留<select value={settings.raw_retention_mode} onChange={(event) => updateSetting("raw_retention_mode", event.target.value as RawRetentionMode)}><option value="keep_forever">长期保留</option><option value="delete_after_days">按天数删除</option><option value="delete_after_successful_run">成功运行后删除</option></select></label>
+          <label>保留天数<input type="number" min="0" value={settings.raw_retention_days} onChange={(event) => updateSetting("raw_retention_days", Number(event.target.value))} /></label>
+        </div>
+        <div className="privacyActions">
+          <button className="primary" onClick={() => onSaveSettings(settings)} disabled={busy}><Shield size={16} />保存设置</button>
+          <button onClick={onApplyRetention} disabled={busy}><Trash2 size={16} />执行保留策略</button>
+          <button onClick={onWriteLegalDrafts} disabled={busy}><FileText size={16} />生成协议草案</button>
+        </div>
+        <div className="secureState"><KeyRound size={16} /><span>API Key：{privacy.secure_credentials.openai_compatible_saved ? `已加密保存 ${privacy.secure_credentials.updated_at ?? ""}` : "未保存到本地"}</span></div>
+      </section>
+
+      <section className="panel">
+        <h2>敏感内容扫描</h2>
+        <label className="fullField">待扫描文本<textarea value={scanText} onChange={(event) => setScanText(event.target.value)} /></label>
+        <button className="primary" onClick={() => void onScan(scanText).then(setScanResult)} disabled={busy}><Search size={16} />扫描</button>
+        {scanResult && <div className="scanResult"><strong>{scanResult.sensitivity} · {scanResult.can_enter_personal_kb ? "可进入个人库" : "默认阻断"}</strong>{scanResult.findings.map((finding, index) => <span key={`${finding.rule_id}-${index}`}>{finding.label} · {finding.severity} · {finding.match_preview}</span>)}{scanResult.findings.length === 0 && <span>未发现敏感规则命中</span>}</div>}
+      </section>
+
+      <section className="panel">
+        <h2>来源授权说明</h2>
+        <div className="sourceAuthList">{privacy.sources.map((source) => <div className="sourceAuthRow" key={source.source_app}><strong>{source.display_name} · {source.authorized ? "已授权" : "未授权"}</strong><span>{source.permission_scope}</span><small>读取：{source.reads.join("；")}</small><small>不读取：{source.does_not_read.join("；")}</small></div>)}</div>
+      </section>
+
+      <section className="panel">
+        <h2>用户数据</h2>
+        <div className="formGrid"><label>删除来源<select value={sourceToDelete} onChange={(event) => setSourceToDelete(event.target.value)}>{connectors.map((connector) => <option key={connector.source_app} value={connector.source_app}>{connector.display_name}</option>)}</select></label></div>
+        <div className="privacyActions">
+          <button onClick={() => onDeleteSource(sourceToDelete)} disabled={busy}><Trash2 size={16} />删除来源数据</button>
+          <button onClick={onExportUserData} disabled={busy}><Download size={16} />导出用户数据</button>
+          <button onClick={onDeleteAllUserData} disabled={busy}><Trash2 size={16} />彻底删除本地数据</button>
+        </div>
+      </section>
+
+      <section className="panel">
+        <h2>隐私分级规则</h2>
+        <div className="ruleList">{privacy.rules.map((rule) => <div className="ruleRow" key={rule.rule_id}><strong>{rule.label}</strong><span>{rule.sensitivity} · {rule.severity}</span><small>{rule.description}</small></div>)}</div>
+      </section>
+    </div>
+  );
+}
+
 function PendingPanel({ atoms, counts, query, selectedId, onQuery, onSelect }: { atoms: KnowledgeAtomDocument[]; counts: Record<ReviewStatus, number>; query: string; selectedId: string; onQuery: (value: string) => void; onSelect: (atomId: string) => void }) {
   return (
     <section className="panel fill">
@@ -1007,7 +1203,7 @@ function SettingsPanel({ state, busy, onSave }: { state: DesktopState; busy: boo
         <label>AI 服务<select value={aiProvider} onChange={(event) => setAiProvider(event.target.value)}><option value="fixture">fixture</option><option value="openai-compatible">openai-compatible</option></select></label>
         <label>Base URL<input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://api.example.com/v1" /></label>
         <label>模型<input value={model} onChange={(event) => setModel(event.target.value)} placeholder="model-name" /></label>
-        <label>API Key<input value={apiKey} onChange={(event) => setApiKey(event.target.value)} type="password" placeholder="仅当前会话" /></label>
+        <label>API Key<input value={apiKey} onChange={(event) => setApiKey(event.target.value)} type="password" placeholder="本地加密保存" /></label>
       </div>
       <button className="primary" onClick={() => onSave({ sourceApp, aiProvider, baseUrl, model, apiKey })} disabled={busy}><Shield size={17} /><span>保存会话配置</span></button>
     </section>
@@ -1053,6 +1249,7 @@ function subtitleFor(active: NavKey): string {
     import: "手动导入本地导出文件",
     run: "执行每日沉淀流程",
     library: "搜索、筛选、合并、日历和导出",
+    privacy: "来源授权、敏感识别、数据导出和删除",
     pending: "审查候选知识原子",
     detail: "编辑、批准、拒绝或合并",
     settings: "AI 服务和本地配置",

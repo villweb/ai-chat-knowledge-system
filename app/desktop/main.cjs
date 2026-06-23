@@ -67,14 +67,19 @@ app.on("activate", () => {
 });
 
 function registerIpc() {
-  ipcMain.handle("app:get-state", async () => ({
-    ...state,
-    automation: await getAutomationState(),
-    connectors: await listConnectors(),
-    atoms: await listAtoms(),
-    knowledge: await getKnowledgeView({}),
-    logs: await listLogs()
-  }));
+  ipcMain.handle("app:get-state", async () => {
+    const privacy = await getPrivacyState();
+    return {
+      ...state,
+      apiKeyConfigured: state.apiKeyConfigured || privacy.secure_credentials.openai_compatible_saved,
+      automation: await getAutomationState(),
+      connectors: await listConnectors(),
+      atoms: await listAtoms(),
+      knowledge: await getKnowledgeView({}),
+      privacy,
+      logs: await listLogs()
+    };
+  });
 
   ipcMain.handle("vault:choose", async () => {
     const result = await dialog.showOpenDialog({ properties: ["openDirectory"] });
@@ -96,6 +101,15 @@ function registerIpc() {
     state.apiKeyConfigured = Boolean(input.apiKey);
     if (input.apiKey) {
       process.env.AI_KB_OPENAI_API_KEY = input.apiKey;
+      const credentialResult = await runScript("scripts/privacy-security.ts", ["save-credential", "--vault-root", state.vaultRoot], JSON.stringify({
+        service: "openai-compatible",
+        api_key: input.apiKey,
+        base_url: input.baseUrl ?? "",
+        model: input.model ?? ""
+      }));
+      if (!credentialResult.ok) {
+        throw new Error(credentialResult.stderr || "API Key 加密保存失败。");
+      }
     }
     if (input.baseUrl) {
       process.env.AI_KB_OPENAI_BASE_URL = input.baseUrl;
@@ -103,7 +117,7 @@ function registerIpc() {
     if (input.model) {
       process.env.AI_KB_OPENAI_MODEL = input.model;
     }
-    pushEvent("settings_saved", "AI 服务配置已保存到当前会话。");
+    pushEvent("settings_saved", input.apiKey ? "AI 服务配置已保存，API Key 已本地加密保存。" : "AI 服务配置已保存。");
     return { ok: true, aiProvider: state.aiProvider, apiKeyConfigured: state.apiKeyConfigured };
   });
 
@@ -233,6 +247,18 @@ function registerIpc() {
     return JSON.parse(result.stdout);
   });
 
+  ipcMain.handle("privacy:get-state", async () => getPrivacyState());
+  ipcMain.handle("privacy:save-settings", async (_event, input) => runPrivacyAction("save-settings", input ?? {}, "保存隐私设置失败。"));
+  ipcMain.handle("privacy:scan", async (_event, input) => runPrivacyAction("scan", input ?? {}, "敏感内容扫描失败。"));
+  ipcMain.handle("privacy:apply-retention", async () => runPrivacyAction("apply-retention", undefined, "执行原始记录保留策略失败。"));
+  ipcMain.handle("privacy:delete-source", async (_event, input) => {
+    if (!input?.source_app) throw new Error("缺少要删除的来源。");
+    return runPrivacyAction("delete-source", undefined, "删除来源数据失败。", ["--source-app", input.source_app]);
+  });
+  ipcMain.handle("privacy:export-user-data", async () => runPrivacyAction("export-user-data", undefined, "导出用户数据失败。"));
+  ipcMain.handle("privacy:delete-all-user-data", async () => runPrivacyAction("delete-all-user-data", undefined, "彻底删除用户数据失败。"));
+  ipcMain.handle("privacy:write-legal-drafts", async () => runPrivacyAction("write-legal-drafts", undefined, "生成隐私政策和用户协议草案失败。"));
+
   ipcMain.handle("logs:list", async () => listLogs());
 
   ipcMain.handle("automation:get-state", async () => getAutomationState());
@@ -361,6 +387,24 @@ async function listDailyRunHistory() {
   return JSON.parse(result.stdout);
 }
 
+async function getPrivacyState() {
+  const result = await runScript("scripts/privacy-security.ts", ["state", "--vault-root", state.vaultRoot]);
+  if (!result.ok) {
+    throw new Error(result.stderr || "读取隐私安全状态失败。");
+  }
+  return JSON.parse(result.stdout);
+}
+
+async function runPrivacyAction(action, input, errorMessage, extraArgs = []) {
+  const args = [action, "--vault-root", state.vaultRoot, ...extraArgs];
+  const result = await runScript("scripts/privacy-security.ts", args, input ? JSON.stringify(input) : undefined);
+  if (!result.ok) {
+    throw new Error(result.stderr || errorMessage);
+  }
+  pushEvent(`privacy_${action.replaceAll("-", "_")}`, errorMessage.replace("失败。", "完成。"));
+  return JSON.parse(result.stdout);
+}
+
 async function getKnowledgeView(input) {
   const result = await runScript("scripts/knowledge-library.ts", ["view", "--vault-root", state.vaultRoot], JSON.stringify(input ?? {}));
   if (!result.ok) {
@@ -473,6 +517,10 @@ async function runDailyWorkflow(runDate, runIdPrefix) {
     throw new Error(importResult.stderr || "导入失败，已停止每日运行。");
   }
 
+  if (state.aiProvider === "openai-compatible") {
+    await loadSecureCredentialIntoEnv();
+  }
+
   const extractResult = await runScript("scripts/extract-knowledge-atoms.ts", extractArgs);
   if (!extractResult.ok) {
     pushEvent("daily_run", extractResult.stderr);
@@ -480,6 +528,21 @@ async function runDailyWorkflow(runDate, runIdPrefix) {
   }
 
   return { importResult, extractResult };
+}
+
+async function loadSecureCredentialIntoEnv() {
+  const result = await runScript("scripts/privacy-security.ts", ["load-credential", "--vault-root", state.vaultRoot]);
+  if (!result.ok) {
+    throw new Error(result.stderr || "读取本地加密 API Key 失败。");
+  }
+  const credential = JSON.parse(result.stdout);
+  if (!credential?.api_key) {
+    throw new Error("未配置本地加密 API Key。");
+  }
+  process.env.AI_KB_OPENAI_API_KEY = credential.api_key;
+  if (credential.base_url) process.env.AI_KB_OPENAI_BASE_URL = credential.base_url;
+  if (credential.model) process.env.AI_KB_OPENAI_MODEL = credential.model;
+  state.apiKeyConfigured = true;
 }
 
 async function writeAutomationFailureRun(runDate, runId, message) {

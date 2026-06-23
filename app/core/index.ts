@@ -5,4 +5,5 @@ export * from "./knowledge-library";
 export * from "./knowledge-review";
 export * from "./manual-import-normalization-runner";
 export * from "./normalize-manual-import";
+export * from "./privacy-security";
 export * from "./rebuild-local-indexes";
