@@ -660,9 +660,16 @@ nav {
   line-height: 1.5;
 }
 
-.importCta {
+.importCtaRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   width: 100%;
   max-width: 360px;
+}
+
+.importCtaRow .importCta {
+  flex: 1;
 }
 
 .hint {
@@ -1205,6 +1212,13 @@ nav {
   font-weight: 650;
 }
 
+.formGrid label > span:first-child,
+.formGrid label > :first-child:not(select):not(input):not(textarea) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .formGrid input,
 .formGrid select,
 .fullField textarea {
@@ -1547,6 +1561,11 @@ nav {
   display: grid;
   grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr);
   gap: 16px;
+}
+
+.privacyLayout > .firstTimeBanner,
+.commercialLayout > .firstTimeBanner {
+  grid-column: 1 / -1;
 }
 
 .privacyLayout .panel {

@@ -1211,7 +1211,7 @@ function App() {
         <div className="vaultBox">
           <span>知识库</span>
           <strong>{compactPath(state.vaultRoot)}</strong>
-          <button className="iconText" onClick={() => withBusy(() => desktopApi.chooseVault(), "知识库位置已更新")} disabled={busy}>
+          <button className="iconText" onClick={() => withBusy(() => desktopApi.chooseVault(), "知识库位置已更新")} disabled={busy} title="选择本地知识库存放目录">
             <FolderOpen size={16} />
             <span>选择</span>
           </button>
@@ -1466,9 +1466,9 @@ function ReviewSuccessBanner({
         </span>
       </div>
       <div className="reviewSuccessActions">
-        <button className="primary" onClick={onGoLibrary}><BookOpenCheck size={16} />去知识库查看</button>
+        <button className="primary" onClick={onGoLibrary} title="查看刚批准的知识"><BookOpenCheck size={16} />去知识库查看</button>
         {remainingPending > 0 && (
-          <button onClick={onContinueReview}><ListChecks size={16} />继续审查下一条</button>
+          <button onClick={onContinueReview} title="继续审查下一条待确认"><ListChecks size={16} />继续审查下一条</button>
         )}
         <button className="iconOnly" onClick={onDismiss} title="关闭"><X size={16} /></button>
       </div>
@@ -1971,10 +1971,10 @@ function LibraryPanel({
           <label><Filter size={15} />状态<select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">全部</option>{knowledge.facets.statuses.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select></label>
         </div>
         <div className="libraryToolbar">
-          <button onClick={onExport} disabled={busy}><Download size={16} />导出 Markdown</button>
-          <button onClick={onObsidian} disabled={busy}><BookOpenCheck size={16} />Obsidian 索引</button>
-          <button onClick={onBackup} disabled={busy}><HardDriveDownload size={16} />备份</button>
-          <button onClick={onRestore} disabled={busy}><RefreshCw size={16} />恢复最近备份</button>
+          <button onClick={onExport} disabled={busy} title="将全部已批准知识导出为 Markdown 文件"><Download size={16} />导出 Markdown</button>
+          <button onClick={onObsidian} disabled={busy} title="生成 Obsidian 兼容的索引和文件结构"><BookOpenCheck size={16} />Obsidian 索引</button>
+          <button onClick={onBackup} disabled={busy} title="创建知识库完整备份到本地"><HardDriveDownload size={16} />备份</button>
+          <button onClick={onRestore} disabled={busy} title="从最近一次备份恢复知识库"><RefreshCw size={16} />恢复最近备份</button>
         </div>
       </section>
 
@@ -2019,7 +2019,9 @@ function LibraryPanel({
                 {group.items.map((item) => (
                   <div className="duplicateRow" key={item.atom.atom_id}>
                     <button onClick={() => onSelect(item.atom.atom_id)}>{item.atom.title}</button>
-                    {target && item.atom.atom_id !== target.atom.atom_id && <button onClick={() => onMerge(item.atom.atom_id, target.atom.atom_id)} disabled={busy}><Split size={15} />合并到首条</button>}
+                    {target && item.atom.atom_id !== target.atom.atom_id && (
+                      <button onClick={() => onMerge(item.atom.atom_id, target.atom.atom_id)} disabled={busy} title="将相似知识合并到首条，避免重复"><Split size={15} />合并到首条</button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -2084,8 +2086,16 @@ function PrivacyPanel({
 
   return (
     <div className="privacyLayout">
+      <FirstTimeBanner section="privacy">
+        <strong>隐私与安全</strong>
+        控制来源授权、敏感内容识别、原始记录保留策略，以及数据导出与删除。
+      </FirstTimeBanner>
       <section className="panel">
-        <h2>隐私和安全设置</h2>
+        <SectionHeading
+          title="隐私和安全设置"
+          hint="决定哪些内容可进入个人库、原始文件保留多久、是否允许云端 AI 处理。"
+          help="敏感规则会在导入和提炼时自动扫描，命中高风险内容默认阻断。"
+        />
         <div className="formGrid">
           <label>来源授权<select value={settings.require_source_authorization ? "yes" : "no"} onChange={(event) => updateSetting("require_source_authorization", event.target.value === "yes")}><option value="yes">需要</option><option value="no">不需要</option></select></label>
           <label>云端 AI 处理 private<select value={settings.allow_cloud_ai_for_private ? "yes" : "no"} onChange={(event) => updateSetting("allow_cloud_ai_for_private", event.target.value === "yes")}><option value="no">禁止</option><option value="yes">允许</option></select></label>
@@ -2093,9 +2103,9 @@ function PrivacyPanel({
           <label>保留天数<input type="number" min="0" value={settings.raw_retention_days} onChange={(event) => updateSetting("raw_retention_days", Number(event.target.value))} /></label>
         </div>
         <div className="privacyActions">
-          <button className="primary" onClick={() => onSaveSettings(settings)} disabled={busy}><Shield size={16} />保存设置</button>
-          <button onClick={onApplyRetention} disabled={busy}><Trash2 size={16} />执行保留策略</button>
-          <button onClick={onWriteLegalDrafts} disabled={busy}><FileText size={16} />生成协议草案</button>
+          <button className="primary" onClick={() => onSaveSettings(settings)} disabled={busy} title="保存隐私和安全相关配置"><Shield size={16} />保存设置</button>
+          <button onClick={onApplyRetention} disabled={busy} title="按当前保留策略清理过期原始文件"><Trash2 size={16} />执行保留策略</button>
+          <button onClick={onWriteLegalDrafts} disabled={busy} title="在本地生成隐私政策和用户协议草案"><FileText size={16} />生成协议草案</button>
         </div>
         <div className="secureState"><KeyRound size={16} /><span>API Key：{privacy.secure_credentials.openai_compatible_saved ? `已加密保存 ${privacy.secure_credentials.updated_at ?? ""}` : "未保存到本地"}</span></div>
       </section>
@@ -2156,8 +2166,16 @@ function CommercialPanel({
 
   return (
     <div className="commercialLayout">
+      <FirstTimeBanner section="commercial">
+        <strong>授权与版本</strong>
+        查看试用状态、激活付费授权、对比版本差异，以及反馈入口。
+      </FirstTimeBanner>
       <section className="panel commercialHero">
-        <h2>授权状态</h2>
+        <SectionHeading
+          title="授权状态"
+          hint="试用期内可使用付费功能；过期后部分功能将锁定。"
+          help="已有数据的导出通常不受授权限制。"
+        />
         <div className="commercialStatus">
           <BadgeCheck size={22} />
           <div>
@@ -2198,7 +2216,7 @@ function CommercialPanel({
         <h2>激活和账号</h2>
         <label className="fullField">激活码<textarea value={activationCode} onChange={(event) => setActivationCode(event.target.value)} placeholder="AIKB1..." /></label>
         <div className="commercialActions">
-          <button className="primary" onClick={() => onActivate(activationCode)} disabled={busy || !activationCode.trim()}><BadgeCheck size={16} />激活授权</button>
+          <button className="primary" onClick={() => onActivate(activationCode)} disabled={busy || !activationCode.trim()} title="输入购买后获得的激活码以解锁付费功能"><BadgeCheck size={16} />激活授权</button>
         </div>
         <label>账号邮箱<input value={accountEmail} onChange={(event) => setAccountEmail(event.target.value)} placeholder="you@example.com" /></label>
         <div className="commercialActions">
@@ -2233,7 +2251,7 @@ function CommercialPanel({
         </div>
         <label className="fullField">内容<textarea value={feedbackMessage} onChange={(event) => setFeedbackMessage(event.target.value)} placeholder="写下问题、建议或购买相关反馈" /></label>
         <div className="commercialActions">
-          <button className="primary" onClick={() => onCreateFeedback({ category: feedbackCategory, contact_email: feedbackEmail, message: feedbackMessage })} disabled={busy || !feedbackMessage.trim()}><FileText size={16} />创建反馈草稿</button>
+          <button className="primary" onClick={() => onCreateFeedback({ category: feedbackCategory, contact_email: feedbackEmail, message: feedbackMessage })} disabled={busy || !feedbackMessage.trim()} title="在本地创建反馈草稿，可通过支持渠道发送"><FileText size={16} />创建反馈草稿</button>
           <a href={commercial.feedback.feedback_url} target="_blank" rel="noreferrer"><Globe size={16} />在线支持</a>
         </div>
       </section>
@@ -2264,6 +2282,13 @@ function PendingPanel({
 }) {
   const [statusFilter, setStatusFilter] = useState<ReviewStatus>("pending");
   const [onlyCurrentImport, setOnlyCurrentImport] = useState(importBatchAtomIds.length > 0);
+
+  const statusTabHints: Record<ReviewStatus, string> = {
+    pending: "AI 生成的候选知识，等待你批准或拒绝",
+    approved: "你已批准、可进入知识库长期使用的知识",
+    rejected: "你已拒绝、不会进入正式库的内容",
+    merged: "已合并到其他知识条目中"
+  };
 
   const statusTabs: Array<{ key: ReviewStatus; label: string; count: number }> = [
     { key: "pending", label: "待确认", count: counts.pending },
@@ -2306,13 +2331,20 @@ function PendingPanel({
 
   return (
     <section className="panel fill">
+      <FirstTimeBanner section="pending">
+        <strong>待确认：人工把关质量</strong>
+        AI 只生成候选草稿，你必须逐条批准后才进入正式知识库，避免错误内容自动入库。
+      </FirstTimeBanner>
       <div className="pendingPurpose">
-        <h2>待确认</h2>
-        <p className="panelPurpose">AI 生成的候选知识需要你确认后才会进入正式库，避免错误内容自动入库。</p>
+        <SectionHeading
+          title="待确认"
+          hint="审查 AI 候选的质量与隐私，批准后才可搜索和使用。"
+          help="这是质量关卡：批准进入知识库，拒绝则丢弃，合并则归入已有知识。"
+        />
         {counts.pending > 0 ? (
           <p className="muted pendingMeta">
             当前 {counts.pending} 条待审查。确认后可在
-            <button type="button" className="inlineLink" onClick={onGoLibrary}>知识库</button>
+            <button type="button" className="inlineLink" onClick={onGoLibrary} title="查看已批准的知识">知识库</button>
             搜索和使用。
           </p>
         ) : (
@@ -2327,6 +2359,7 @@ function PendingPanel({
               type="button"
               className={statusFilter === tab.key ? `statusPill active status ${tab.key}` : `statusPill status ${tab.key}`}
               onClick={() => setStatusFilter(tab.key)}
+              title={statusTabHints[tab.key]}
             >
               {tab.label} {tab.count}
             </button>
@@ -2433,10 +2466,10 @@ function DetailPanel({
       <label className="fullField">内容<textarea value={content} onChange={(event) => setContent(event.target.value)} /></label>
       <div className="evidence"><strong>证据</strong><p>{document.atom.evidence}</p><small>{document.atom.source_raw_paths.join(", ")}</small></div>
       <div className="actions">
-        <button onClick={() => onUpdate(baseInput)} disabled={busy}><SquarePen size={16} />保存</button>
-        <button onClick={() => onReview({ ...baseInput, review_status: "approved" })} disabled={busy}><Check size={16} />批准</button>
-        <button onClick={() => onReview({ ...baseInput, review_status: "rejected" })} disabled={busy}><X size={16} />拒绝</button>
-        <button onClick={() => onReview({ ...baseInput, review_status: "merged", merged_into: mergedInto })} disabled={busy || !mergedInto}><Split size={16} />合并</button>
+        <button onClick={() => onUpdate(baseInput)} disabled={busy} title="保存标题、类型、标签和正文的修改"><SquarePen size={16} />保存</button>
+        <button onClick={() => onReview({ ...baseInput, review_status: "approved" })} disabled={busy} title="批准后将进入正式知识库，可在知识库搜索和使用"><Check size={16} />批准</button>
+        <button onClick={() => onReview({ ...baseInput, review_status: "rejected" })} disabled={busy} title="拒绝后不会进入知识库，可从列表中移除"><X size={16} />拒绝</button>
+        <button onClick={() => onReview({ ...baseInput, review_status: "merged", merged_into: mergedInto })} disabled={busy || !mergedInto} title="将本条知识合并到已选目标，避免重复"><Split size={16} />合并</button>
       </div>
     </section>
   );
@@ -2462,7 +2495,15 @@ function SettingsPanel({
   return (
     <div className="grid two">
       <section className="panel settingsPanel">
-        <h2>设置</h2>
+        <FirstTimeBanner section="settings">
+          <strong>配置 AI 服务与默认来源</strong>
+          测试模式不调用外部 API；切换为真实 AI API 后需填写 Base URL、模型和 API Key。
+        </FirstTimeBanner>
+        <SectionHeading
+          title="设置"
+          hint="默认来源决定导入文件保存位置；AI 服务决定提炼是否调用真实接口。"
+          help="API Key 加密保存在本地，不会上传到云端。"
+        />
         {isFixtureProvider(aiProvider) && (
           <div className="importAiNotice warning">
             <strong>当前为本地测试模式（fixture）</strong>
@@ -2470,13 +2511,33 @@ function SettingsPanel({
           </div>
         )}
         <div className="formGrid">
-          <label>默认来源<select value={sourceApp} onChange={(event) => setSourceApp(event.target.value)}>{state.connectors.filter((connector) => connector.status === "available" && connector.enabled).map((connector) => <option key={connector.source_app} value={connector.source_app}>{connector.display_name}</option>)}</select></label>
-          <label>AI 服务<select value={aiProvider} onChange={(event) => setAiProvider(event.target.value)}><option value="fixture">本地测试模式（不调用 API）</option><option value="openai-compatible">真实 AI API（OpenAI 兼容，如 DeepSeek）</option></select></label>
-          <label>Base URL<input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://api.deepseek.com/v1" /></label>
-          <label>模型<input value={model} onChange={(event) => setModel(event.target.value)} placeholder="deepseek-chat" /></label>
-          <label>API Key<input value={apiKey} onChange={(event) => setApiKey(event.target.value)} type="password" placeholder={state.apiKeyConfigured ? "已保存，留空则不修改" : "本地加密保存"} /></label>
+          <label>
+            默认来源
+            <HelpTip title="导入文件的默认平台" detail="决定 raw/imports 下的子目录和默认连接器。" />
+            <select value={sourceApp} onChange={(event) => setSourceApp(event.target.value)}>{state.connectors.filter((connector) => connector.status === "available" && connector.enabled).map((connector) => <option key={connector.source_app} value={connector.source_app}>{connector.display_name}</option>)}</select>
+          </label>
+          <label>
+            AI 服务
+            <HelpTip title="fixture 与真实 API 的区别" detail="fixture：本地模板，不联网、不消耗额度。真实 API：调用 OpenAI 兼容接口（如 DeepSeek）进行提炼。" />
+            <select value={aiProvider} onChange={(event) => setAiProvider(event.target.value)}><option value="fixture">本地测试模式（不调用 API）</option><option value="openai-compatible">真实 AI API（OpenAI 兼容，如 DeepSeek）</option></select>
+          </label>
+          <label>
+            Base URL
+            <HelpTip title="API 服务地址" detail="DeepSeek 示例：https://api.deepseek.com/v1" />
+            <input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://api.deepseek.com/v1" />
+          </label>
+          <label>
+            模型
+            <HelpTip title="调用的模型名称" detail="DeepSeek 示例：deepseek-chat" />
+            <input value={model} onChange={(event) => setModel(event.target.value)} placeholder="deepseek-chat" />
+          </label>
+          <label>
+            API Key
+            <HelpTip title="访问密钥" detail="本地加密保存；留空则保持已保存的密钥不变。" />
+            <input value={apiKey} onChange={(event) => setApiKey(event.target.value)} type="password" placeholder={state.apiKeyConfigured ? "已保存，留空则不修改" : "本地加密保存"} />
+          </label>
         </div>
-        <button className="primary" onClick={() => onSave({ sourceApp, aiProvider, baseUrl, model, apiKey })} disabled={busy}><Shield size={17} /><span>保存会话配置</span></button>
+        <button className="primary" onClick={() => onSave({ sourceApp, aiProvider, baseUrl, model, apiKey })} disabled={busy} title="保存来源、AI 服务和 API 配置"><Shield size={17} /><span>保存会话配置</span></button>
       </section>
 
       <section className="panel releasePanel">
