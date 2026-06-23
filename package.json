@@ -9,6 +9,9 @@
     "sqlite:rebuild": "npm rebuild better-sqlite3 --build-from-source",
     "test": "node --import tsx --test tests/*.test.ts",
     "typecheck": "tsc --noEmit",
+    "desktop:dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && AI_KB_DESKTOP_DEV_SERVER=http://127.0.0.1:5173 electron app/desktop/main.cjs\"",
+    "desktop:build": "vite build",
+    "desktop:preview": "vite --host 127.0.0.1",
     "p1:codex-import": "tsx scripts/run-manual-import-normalization.ts --source-app codex",
     "p1:rebuild-indexes": "tsx scripts/rebuild-local-indexes.ts",
     "p2:extract-candidates": "tsx scripts/extract-knowledge-atoms.ts --source-app codex --provider fixture --allow-ai"
@@ -19,11 +22,21 @@
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^26.0.0",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "concurrently": "^10.0.3",
+    "electron": "^42.4.1",
     "tsx": "^4.22.4",
-    "typescript": "^6.0.2"
+    "typescript": "^6.0.2",
+    "vite": "^8.0.16",
+    "wait-on": "^9.0.10"
   },
   "dependencies": {
     "better-sqlite3": "^12.11.1",
+    "lucide-react": "^1.21.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
     "yaml": "^2.9.0"
   }
 }

@@ -6,6 +6,7 @@ import {
 import type { SourceApp } from "../app/schemas";
 
 type CliOptions = {
+  vault_root: string;
   allow_ai: boolean;
   provider: KnowledgeExtractionProviderName;
   source_app?: SourceApp;
@@ -13,7 +14,6 @@ type CliOptions = {
 
 const options = parseArgs(process.argv.slice(2));
 const summary = await extractKnowledgeAtoms({
-  vault_root: process.cwd(),
   ...options
 });
 
@@ -55,6 +55,7 @@ function parseArgs(args: string[]): CliOptions {
   }
 
   return {
+    vault_root: String(values.get("vault-root") ?? process.cwd()),
     allow_ai: values.get("allow-ai") === true,
     provider,
     ...(sourceApp ? { source_app: sourceApp } : {})

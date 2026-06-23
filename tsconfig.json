@@ -3,6 +3,8 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
     "strict": true,
     "esModuleInterop": true,
     "exactOptionalPropertyTypes": true,
@@ -12,5 +14,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["app/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts"]
+  "include": ["app/**/*.ts", "app/**/*.tsx", "scripts/**/*.ts", "tests/**/*.ts", "vite.config.ts"]
 }
