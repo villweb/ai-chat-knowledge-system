@@ -354,13 +354,16 @@ declare global {
 
 const desktopApi = getDesktopApi();
 
-const ONBOARDING_DISMISS_KEY = "ai-kb-onboarding-dismissed";
+const PRODUCT_GUIDE_DISMISS_KEY = "ai-kb-product-guide-dismissed";
 
-const onboardingSteps = [
-  { step: 1, label: "导入", hint: "选择 AI 聊天导出文件" },
-  { step: 2, label: "自动提炼", hint: "标准化并生成候选知识（测试模式不调用外部 API）" },
-  { step: 3, label: "待确认审查", hint: "在「待确认」中批准或拒绝" }
+const flowJourneySteps = [
+  { step: 1, label: "导入对话", hint: "选择 AI 聊天导出文件", why: "从已有对话开始沉淀个人知识" },
+  { step: 2, label: "AI 提炼候选", hint: "自动标准化并生成候选知识", why: "AI 只生成草稿，不会直接写入正式库" },
+  { step: 3, label: "你确认质量", hint: "批准或拒绝每条候选", why: "避免错误内容自动入库，保护隐私与质量" },
+  { step: 4, label: "知识库使用", hint: "搜索、导出、同步 Obsidian", why: "已批准的知识在这里长期使用" }
 ];
+
+const flowJourneyPageKeys: NavKey[] = ["import", "pending", "library", "detail"];
 
 const navItems: Array<{ key: NavKey; label: string; icon: React.ComponentType<{ size?: number }> }> = [
   { key: "guide", label: "引导", icon: BookOpenCheck },
@@ -841,15 +844,22 @@ function App() {
   const [notice, setNotice] = useState("");
   const [noticeKind, setNoticeKind] = useState<"info" | "error">("info");
   const [bootError, setBootError] = useState("");
-  const [onboardingDismissed, setOnboardingDismissed] = useState(() => {
+  const [productGuideDismissed, setProductGuideDismissed] = useState(() => {
     try {
-      return localStorage.getItem(ONBOARDING_DISMISS_KEY) === "1";
+      return localStorage.getItem(PRODUCT_GUIDE_DISMISS_KEY) === "1";
     } catch {
       return false;
     }
   });
   const [hasInitializedNav, setHasInitializedNav] = useState(false);
   const [importBatchAtomIds, setImportBatchAtomIds] = useState<string[]>([]);
+  const [recentlyApprovedIds, setRecentlyApprovedIds] = useState<string[]>([]);
+  const [libraryFocusAtomIds, setLibraryFocusAtomIds] = useState<string[]>([]);
+  const [reviewSuccess, setReviewSuccess] = useState<{
+    atomId: string;
+    remainingPending: number;
+    nextPendingId: string;
+  } | null>(null);
 
   useEffect(() => {
     void refresh();
@@ -905,13 +915,39 @@ function App() {
     }
   }
 
-  function dismissOnboarding() {
-    setOnboardingDismissed(true);
+  function dismissProductGuide() {
+    setProductGuideDismissed(true);
     try {
-      localStorage.setItem(ONBOARDING_DISMISS_KEY, "1");
+      localStorage.setItem(PRODUCT_GUIDE_DISMISS_KEY, "1");
     } catch {
       // 忽略本地存储不可用
     }
+  }
+
+  function goToLibrary(focusAtomIds?: string[]) {
+    const ids = focusAtomIds ?? recentlyApprovedIds;
+    setLibraryFocusAtomIds(ids);
+    setActive("library");
+    setReviewSuccess(null);
+  }
+
+  function computeFlowStep(): number {
+    if (active === "library") {
+      return 4;
+    }
+    if (active === "pending" || active === "detail") {
+      return 3;
+    }
+    if (active === "import" && busy) {
+      return 2;
+    }
+    if (counts.pending > 0) {
+      return 3;
+    }
+    if (counts.approved > 0) {
+      return 4;
+    }
+    return 1;
   }
 
   function formatImportSuccess(result: ImportResult): string {
@@ -939,6 +975,9 @@ function App() {
     }
 
     message += "当前 0 条待确认。";
+    if (normalized > 0 || generated > 0) {
+      message += " 已批准的知识可在「知识库」搜索和使用。";
+    }
     if (failed > 0) {
       message += ` ${failed} 个文件处理失败，请查看「日志」。`;
     }
@@ -965,6 +1004,22 @@ function App() {
       .map((item) => item.atom.atom_id);
     const reviewLabel = reviewStatusLabel(reviewStatus);
     const currentPendingIndex = pendingBefore.indexOf(reviewedAtomId);
+
+    if (reviewStatus === "approved") {
+      setRecentlyApprovedIds((previous) => [reviewedAtomId, ...previous.filter((id) => id !== reviewedAtomId)]);
+      const nextPendingId = freshPending[currentPendingIndex] ?? freshPending[currentPendingIndex - 1] ?? freshPending[0] ?? "";
+      setReviewSuccess({
+        atomId: reviewedAtomId,
+        remainingPending: freshPending.length,
+        nextPendingId
+      });
+      setNotice("已入库，可在知识库搜索。");
+      setActive("detail");
+      setSelectedId(reviewedAtomId);
+      return;
+    }
+
+    setReviewSuccess(null);
 
     if (freshPending.length > 0) {
       const nextPendingId = freshPending[currentPendingIndex] ?? freshPending[currentPendingIndex - 1] ?? freshPending[0]!;
@@ -1059,6 +1114,8 @@ function App() {
       }
       if ((result.pending_atom_count ?? 0) > 0) {
         setActive("pending");
+      } else if ((result.generated_atom_count ?? 0) > 0 || (result.normalized_record_count ?? 0) > 0) {
+        setNotice((current) => `${current} 可到「知识库」查看已批准内容。`);
       }
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
@@ -1138,13 +1195,30 @@ function App() {
           </div>
         </header>
 
-        {!onboardingDismissed && (
-          <OnboardingBanner
-            steps={onboardingSteps}
-            activeStep={counts.pending > 0 ? 3 : (state.atoms.length > 0 ? 2 : 1)}
-            onDismiss={dismissOnboarding}
+        {flowJourneyPageKeys.includes(active) && (
+          <FlowJourneyStrip
+            steps={flowJourneySteps}
+            activeStep={computeFlowStep()}
             onGoImport={() => setActive("import")}
             onGoPending={() => setActive("pending")}
+            onGoLibrary={() => goToLibrary()}
+          />
+        )}
+
+        {reviewSuccess && (
+          <ReviewSuccessBanner
+            remainingPending={reviewSuccess.remainingPending}
+            onGoLibrary={() => goToLibrary([reviewSuccess.atomId])}
+            onContinueReview={() => {
+              if (reviewSuccess.nextPendingId) {
+                setSelectedId(reviewSuccess.nextPendingId);
+                setActive("detail");
+              } else {
+                setActive("pending");
+              }
+              setReviewSuccess(null);
+            }}
+            onDismiss={() => setReviewSuccess(null)}
           />
         )}
 
@@ -1162,6 +1236,11 @@ function App() {
             sourceApp={state.sourceApp}
             aiProvider={state.aiProvider}
             importPath={`raw/imports/${state.sourceApp}`}
+            isEmptyVault={state.atoms.length === 0}
+            productGuideDismissed={productGuideDismissed}
+            onDismissProductGuide={dismissProductGuide}
+            onGoPending={() => setActive("pending")}
+            onGoLibrary={() => goToLibrary()}
             onImport={() => void handleImport()}
             onGoSettings={() => setActive("settings")}
             onRunNormalize={() => withBusy(() => desktopApi.runImport(), "标准化完成，请到「待确认」查看结果。")}
@@ -1184,6 +1263,9 @@ function App() {
             atoms={state.atoms}
             knowledge={state.knowledge}
             busy={busy}
+            focusAtomIds={libraryFocusAtomIds}
+            recentlyApprovedIds={recentlyApprovedIds}
+            onClearFocus={() => setLibraryFocusAtomIds([])}
             onSelect={(atomId) => { setSelectedId(atomId); setActive("detail"); }}
             onMerge={(atomId, targetId) => withBusy(() => desktopApi.updateAtom({ atom_id: atomId, review_status: "merged", merged_into: targetId }), "知识已合并")}
             onExport={() => withBusy(() => desktopApi.exportKnowledgeMarkdown(), "Markdown 导出完成")}
@@ -1225,6 +1307,7 @@ function App() {
             onQuery={setQuery}
             onSelect={(atomId) => { setSelectedId(atomId); setActive("detail"); }}
             onClearImportBatch={() => setImportBatchAtomIds([])}
+            onGoLibrary={() => goToLibrary()}
           />
         )}
         {active === "detail" && selected && (
@@ -1256,40 +1339,102 @@ function FixtureModeBanner({ onGoSettings }: { onGoSettings: () => void }) {
   );
 }
 
-function OnboardingBanner({
+function FlowJourneyStrip({
   steps,
   activeStep,
-  onDismiss,
   onGoImport,
-  onGoPending
+  onGoPending,
+  onGoLibrary
 }: {
-  steps: Array<{ step: number; label: string; hint: string }>;
+  steps: Array<{ step: number; label: string; hint: string; why: string }>;
   activeStep: number;
-  onDismiss: () => void;
   onGoImport: () => void;
   onGoPending: () => void;
+  onGoLibrary: () => void;
 }) {
   return (
-    <div className="onboardingBanner">
-      <div className="onboardingHead">
-        <strong>三步完成首次沉淀</strong>
-        <button className="iconOnly" onClick={onDismiss} title="关闭引导"><X size={16} /></button>
+    <div className="flowJourneyStrip">
+      <div className="flowJourneySteps">
+        {steps.map((item) => {
+          const isActive = activeStep === item.step;
+          const isDone = activeStep > item.step;
+          return (
+            <button
+              key={item.step}
+              type="button"
+              className={[
+                "flowJourneyStep",
+                isActive ? "active" : "",
+                isDone ? "done" : ""
+              ].filter(Boolean).join(" ")}
+              onClick={() => {
+                if (item.step <= 1) {
+                  onGoImport();
+                } else if (item.step <= 3) {
+                  onGoPending();
+                } else {
+                  onGoLibrary();
+                }
+              }}
+            >
+              <span className="stepNumber">{item.step}</span>
+              <div>
+                <strong>{item.label}</strong>
+                <small>{isActive ? item.why : item.hint}</small>
+              </div>
+            </button>
+          );
+        })}
       </div>
-      <div className="onboardingSteps">
-        {steps.map((item) => (
-          <div key={item.step} className={activeStep >= item.step ? "onboardingStep active" : "onboardingStep"}>
-            <span className="stepNumber">{item.step}</span>
-            <div>
-              <strong>{item.label}</strong>
-              <small>{item.hint}</small>
-            </div>
-          </div>
-        ))}
+    </div>
+  );
+}
+
+function ReviewSuccessBanner({
+  remainingPending,
+  onGoLibrary,
+  onContinueReview,
+  onDismiss
+}: {
+  remainingPending: number;
+  onGoLibrary: () => void;
+  onContinueReview: () => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <div className="reviewSuccessBanner">
+      <PackageCheck size={20} />
+      <div>
+        <strong>已入库，可在知识库搜索</strong>
+        <span>
+          {remainingPending > 0
+            ? `还有 ${remainingPending} 条待确认。你可以继续审查，或先去知识库查看刚批准的内容。`
+            : "全部待确认已处理完毕，已批准的知识可在知识库长期使用。"}
+        </span>
       </div>
-      <div className="onboardingActions">
-        <button className="primary" onClick={onGoImport}><FileInput size={16} />去导入</button>
-        {activeStep >= 3 && <button onClick={onGoPending}><ListChecks size={16} />去待确认</button>}
+      <div className="reviewSuccessActions">
+        <button className="primary" onClick={onGoLibrary}><BookOpenCheck size={16} />去知识库查看</button>
+        {remainingPending > 0 && (
+          <button onClick={onContinueReview}><ListChecks size={16} />继续审查下一条</button>
+        )}
+        <button className="iconOnly" onClick={onDismiss} title="关闭"><X size={16} /></button>
       </div>
+    </div>
+  );
+}
+
+function ProductGuideCard({ onDismiss }: { onDismiss: () => void }) {
+  return (
+    <div className="productGuideCard">
+      <div className="productGuideHead">
+        <strong>产品怎么用</strong>
+        <button className="iconOnly" onClick={onDismiss} title="关闭"><X size={16} /></button>
+      </div>
+      <ul className="productGuideList">
+        <li>导入 AI 聊天导出文件，系统自动提炼候选知识</li>
+        <li>在「待确认」审查每条候选，批准后才进入正式库</li>
+        <li>在「知识库」搜索、导出、同步 Obsidian，长期使用已批准知识</li>
+      </ul>
     </div>
   );
 }
@@ -1388,6 +1533,11 @@ function ImportPanel({
   sourceApp,
   aiProvider,
   importPath,
+  isEmptyVault,
+  productGuideDismissed,
+  onDismissProductGuide,
+  onGoPending,
+  onGoLibrary,
   onImport,
   onGoSettings,
   onRunNormalize
@@ -1396,6 +1546,11 @@ function ImportPanel({
   sourceApp: string;
   aiProvider: string;
   importPath: string;
+  isEmptyVault: boolean;
+  productGuideDismissed: boolean;
+  onDismissProductGuide: () => void;
+  onGoPending: () => void;
+  onGoLibrary: () => void;
   onImport: () => void;
   onGoSettings: () => void;
   onRunNormalize: () => void;
@@ -1403,7 +1558,9 @@ function ImportPanel({
   return (
     <div className="grid two">
       <section className="panel">
+        {isEmptyVault && !productGuideDismissed && <ProductGuideCard onDismiss={onDismissProductGuide} />}
         <h2>导入聊天文件</h2>
+        <p className="panelPurpose">导入后 AI 会生成候选，你确认后进入知识库永久保存。</p>
         <p className="muted">选择 AI 聊天导出文件（Markdown、TXT、JSON）。导入后会自动标准化并提炼候选知识。</p>
         {isFixtureProvider(aiProvider) ? (
           <div className="importAiNotice warning">
@@ -1425,7 +1582,11 @@ function ImportPanel({
           <FolderOpen size={17} />
           <span>{busy ? "正在处理..." : "选择文件并自动处理"}</span>
         </button>
-        <p className="muted hint">导入完成后，知识会出现在「待确认」页面。</p>
+        <p className="muted hint">导入完成后，候选知识会进入「待确认」等你审查；批准后可在「知识库」搜索使用。</p>
+        <div className="importFlowLinks">
+          <button type="button" onClick={onGoPending} disabled={busy}><ListChecks size={15} />去待确认</button>
+          <button type="button" onClick={onGoLibrary} disabled={busy}><BookOpenCheck size={15} />去知识库</button>
+        </div>
       </section>
       <section className="panel">
         <h2>高级：仅重新标准化</h2>
@@ -1534,6 +1695,9 @@ function LibraryPanel({
   atoms,
   knowledge,
   busy,
+  focusAtomIds,
+  recentlyApprovedIds,
+  onClearFocus,
   onSelect,
   onMerge,
   onExport,
@@ -1544,6 +1708,9 @@ function LibraryPanel({
   atoms: KnowledgeAtomDocument[];
   knowledge: KnowledgeLibraryView;
   busy: boolean;
+  focusAtomIds: string[];
+  recentlyApprovedIds: string[];
+  onClearFocus: () => void;
   onSelect: (atomId: string) => void;
   onMerge: (atomId: string, targetId: string) => void;
   onExport: () => void;
@@ -1557,11 +1724,36 @@ function LibraryPanel({
   const [project, setProject] = useState("");
   const [tag, setTag] = useState("");
   const [status, setStatus] = useState("");
-  const filtered = useMemo(() => filterKnowledgeItems(atoms, { query, sourceApp, type, project, tag, status }), [atoms, query, sourceApp, type, project, tag, status]);
+  const focusSet = useMemo(() => new Set(focusAtomIds), [focusAtomIds]);
+  const recentSet = useMemo(() => new Set(recentlyApprovedIds), [recentlyApprovedIds]);
+  const showRecentHighlight = focusAtomIds.length > 0 || recentlyApprovedIds.length > 0;
+
+  useEffect(() => {
+    if (focusAtomIds.length > 0) {
+      setStatus("approved");
+    }
+  }, [focusAtomIds]);
+
+  const filtered = useMemo(() => {
+    const base = filterKnowledgeItems(atoms, { query, sourceApp, type, project, tag, status });
+    if (focusAtomIds.length === 0) {
+      return base;
+    }
+    const focused = base.filter((item) => focusSet.has(item.atom.atom_id));
+    return focused.length > 0 ? focused : base;
+  }, [atoms, focusAtomIds, focusSet, project, query, sourceApp, status, tag, type]);
 
   return (
     <div className="libraryLayout">
       <section className="panel">
+        <h2>知识库</h2>
+        <p className="panelPurpose">已批准的知识都在这里，可搜索、导出、同步 Obsidian。</p>
+        {showRecentHighlight && (
+          <div className="libraryRecentBar">
+            <span>正在高亮刚批准的知识</span>
+            <button type="button" onClick={onClearFocus}>显示全部</button>
+          </div>
+        )}
         <div className="listHeader">
           <div className="statusPills">
             <span>全部 {atoms.length}</span>
@@ -1588,16 +1780,26 @@ function LibraryPanel({
         <h2>知识列表</h2>
         <div className="atomList">
           {filtered.map((item) => (
-            <button key={item.atom.atom_id} className="atomRow" onClick={() => onSelect(item.atom.atom_id)}>
+            <button
+              key={item.atom.atom_id}
+              className={[
+                "atomRow",
+                recentSet.has(item.atom.atom_id) || focusSet.has(item.atom.atom_id) ? "recentApproved" : ""
+              ].filter(Boolean).join(" ")}
+              onClick={() => onSelect(item.atom.atom_id)}
+            >
               <strong>{item.atom.title}</strong>
-              <span>{item.atom.type} · {item.atom.review_status} · {item.atom.source_app} · {item.atom.project || "未分项目"}</span>
+              <span>
+                {(recentSet.has(item.atom.atom_id) || focusSet.has(item.atom.atom_id)) && <em className="recentApprovedTag">刚批准</em>}
+                {item.atom.type} · {item.atom.review_status} · {item.atom.source_app} · {item.atom.project || "未分项目"}
+              </span>
               <small>{item.atom.tags.join(", ") || item.atom.evidence}</small>
             </button>
           ))}
           {filtered.length === 0 && (
             <div className="emptyState">
-              <p>导入聊天文件后，已批准的知识会出现在这里。</p>
-              <p className="muted">新导入的内容请先前往「待确认」审查。</p>
+              <p>已批准的知识都在这里，可搜索、导出、同步 Obsidian。</p>
+              <p className="muted">新导入的内容会先进「待确认」，你批准后才出现在这里。</p>
             </div>
           )}
         </div>
@@ -1845,7 +2047,8 @@ function PendingPanel({
   importBatchAtomIds,
   onQuery,
   onSelect,
-  onClearImportBatch
+  onClearImportBatch,
+  onGoLibrary
 }: {
   atoms: KnowledgeAtomDocument[];
   counts: Record<ReviewStatus, number>;
@@ -1855,6 +2058,7 @@ function PendingPanel({
   onQuery: (value: string) => void;
   onSelect: (atomId: string) => void;
   onClearImportBatch: () => void;
+  onGoLibrary: () => void;
 }) {
   const [statusFilter, setStatusFilter] = useState<ReviewStatus>("pending");
   const [onlyCurrentImport, setOnlyCurrentImport] = useState(importBatchAtomIds.length > 0);
@@ -1900,6 +2104,19 @@ function PendingPanel({
 
   return (
     <section className="panel fill">
+      <div className="pendingPurpose">
+        <h2>待确认</h2>
+        <p className="panelPurpose">AI 生成的候选知识需要你确认后才会进入正式库，避免错误内容自动入库。</p>
+        {counts.pending > 0 ? (
+          <p className="muted pendingMeta">
+            当前 {counts.pending} 条待审查。确认后可在
+            <button type="button" className="inlineLink" onClick={onGoLibrary}>知识库</button>
+            搜索和使用。
+          </p>
+        ) : (
+          <p className="muted pendingMeta">暂无待审查内容。已批准的知识可在知识库搜索和使用。</p>
+        )}
+      </div>
       <div className="listHeader">
         <div className="statusPills">
           {statusTabs.map((tab) => (
@@ -1954,10 +2171,12 @@ function PendingPanel({
           <div className="emptyState">
             <p>
               {statusFilter === "pending"
-                ? "导入聊天文件后，候选知识会出现在这里等待你批准或拒绝。"
+                ? "AI 生成的候选知识需要你确认后才会进入正式库，避免错误内容自动入库。"
                 : `当前没有「${statusTabs.find((tab) => tab.key === statusFilter)?.label ?? statusFilter}」状态的知识。`}
             </p>
-            {statusFilter === "pending" && <p className="muted">点击左侧「导入」，选择文件后会自动提炼。</p>}
+            {statusFilter === "pending" && (
+              <p className="muted">点击「导入」选择文件，系统会自动提炼候选；批准后可在「知识库」搜索使用。</p>
+            )}
           </div>
         )}
       </div>
@@ -2126,12 +2345,12 @@ function subtitleFor(active: NavKey): string {
   const subtitles: Record<NavKey, string> = {
     guide: "首次启动、知识库位置和运行状态",
     sources: "来源启用状态和后续连接器边界",
-    import: "选择 AI 聊天导出文件，系统自动完成后续步骤",
+    import: "导入对话，AI 提炼候选后等你确认",
     run: "执行每日沉淀流程",
-    library: "搜索、筛选、合并、日历和导出",
+    library: "已批准知识可搜索、导出、同步 Obsidian",
     privacy: "来源授权、敏感识别、数据导出和删除",
     commercial: "试用、授权、购买、更新公告和反馈",
-    pending: "审查候选知识原子",
+    pending: "审查 AI 候选，确认后才进入正式库",
     detail: "编辑、批准、拒绝或合并",
     settings: "AI 服务和本地配置",
     logs: "运行事件和错误摘要"
