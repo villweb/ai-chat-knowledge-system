@@ -94,6 +94,7 @@ function registerIpc() {
       knowledge: await getKnowledgeView({}),
       privacy,
       release: getReleaseState(),
+      commercial: await getCommercialState(),
       logs: await listLogs()
     };
   });
@@ -324,6 +325,11 @@ function registerIpc() {
   ipcMain.handle("automation:list-history", async () => listDailyRunHistory());
   ipcMain.handle("release:get-state", async () => getReleaseState());
   ipcMain.handle("release:check-for-updates", async () => checkForUpdates());
+
+  ipcMain.handle("commercial:get-state", async () => getCommercialState());
+  ipcMain.handle("commercial:activate-license", async (_event, input) => runCommercialAction("activate-license", input ?? {}, "激活授权失败。"));
+  ipcMain.handle("commercial:save-account", async (_event, input) => runCommercialAction("save-account", input ?? {}, "保存账号入口失败。"));
+  ipcMain.handle("commercial:create-feedback", async (_event, input) => runCommercialAction("create-feedback", input ?? {}, "创建反馈草稿失败。"));
 }
 
 function runCommand(command, args, stdin) {
@@ -448,6 +454,23 @@ async function getPrivacyState() {
   if (!result.ok) {
     throw new Error(result.stderr || "读取隐私安全状态失败。");
   }
+  return JSON.parse(result.stdout);
+}
+
+async function getCommercialState() {
+  const result = await runScript("scripts/commercial.ts", ["state", "--vault-root", state.vaultRoot]);
+  if (!result.ok) {
+    throw new Error(result.stderr || "读取商业化状态失败。");
+  }
+  return JSON.parse(result.stdout);
+}
+
+async function runCommercialAction(action, input, errorMessage) {
+  const result = await runScript("scripts/commercial.ts", [action, "--vault-root", state.vaultRoot], JSON.stringify(input));
+  if (!result.ok) {
+    throw new Error(result.stderr || errorMessage);
+  }
+  pushEvent(`commercial_${action.replaceAll("-", "_")}`, errorMessage.replace("失败。", "完成。"));
   return JSON.parse(result.stdout);
 }
 

@@ -887,6 +887,132 @@ nav {
   font-weight: 700;
 }
 
+.commercialLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.commercialHero {
+  grid-column: 1 / -1;
+}
+
+.commercialStatus {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.commercialStatus strong,
+.commercialStatus span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.commercialStatus strong {
+  color: #172520;
+  font-size: 20px;
+}
+
+.commercialStatus span {
+  color: #5f706b;
+  font-size: 13px;
+  margin-top: 2px;
+}
+
+.commercialNotice {
+  display: grid;
+  gap: 4px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #dce3e0;
+  background: #ffffff;
+}
+
+.commercialNotice.warning {
+  border-color: #e8d7a6;
+  background: #fffaf0;
+}
+
+.commercialNotice.danger {
+  border-color: #efb6b6;
+  background: #fff5f5;
+}
+
+.commercialNotice strong {
+  color: #172520;
+  font-size: 13px;
+}
+
+.commercialNotice span {
+  color: #65766f;
+  font-size: 13px;
+}
+
+.planGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.planCard,
+.websiteRow {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid #dce3e0;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.planCard strong,
+.websiteRow strong {
+  color: #172520;
+}
+
+.planCard span,
+.planCard small,
+.websiteRow span,
+.websiteRow small {
+  color: #65766f;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.commercialActions,
+.commercialLinkList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.commercialLinkList a,
+.commercialActions a {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 13px;
+  border-radius: 8px;
+  border: 1px solid #d5dedb;
+  color: #173c35;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 700;
+  background: #ffffff;
+}
+
+.websiteList {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
 @media (max-width: 900px) {
   .shell {
     grid-template-columns: 1fr;
@@ -922,6 +1048,7 @@ nav {
   .grid.twoWide,
   .libraryLayout,
   .privacyLayout,
+  .commercialLayout,
   .formGrid {
     grid-template-columns: 1fr;
   }
@@ -982,6 +1109,16 @@ nav {
 
   .privacyActions button {
     flex: 1 1 150px;
+  }
+
+  .planGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .commercialActions button,
+  .commercialActions a,
+  .commercialLinkList a {
+    flex: 1 1 160px;
   }
 
   .releaseGrid {
