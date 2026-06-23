@@ -1,0 +1,15 @@
+name: p2_daily_summary
+status: confirmed_for_p2
+rules:
+  - 每日摘要只记录运行事实和候选知识数量。
+  - 不写入完整原始对话。
+  - 不写入 API Key、本机绝对路径或未遮蔽敏感信息。
+output_schema:
+  selected_record_count: number
+  sent_record_count: number
+  blocked_record_count: number
+  generated_atom_count: number
+  skipped_low_value_count: number
+  duplicate_atom_count: number
+  generated_atom_ids:
+    - string

@@ -21,6 +21,11 @@ export class LocalRawArchive implements RawArchiveProvider {
     const absolutePath = resolveVaultPath(this.options.vault_root, archived_path);
     await mkdir(path.dirname(absolutePath), { recursive: true });
     await writeFile(absolutePath, document.content, "utf8");
+    await writeFile(
+      `${absolutePath}.meta.json`,
+      `${JSON.stringify(buildArchiveMetadata(document, archived_path, checksum), null, 2)}\n`,
+      "utf8"
+    );
 
     return {
       raw_path: document.raw_path,
@@ -41,6 +46,23 @@ function sha256(content: string): string {
 function buildArchivePath(document: RawSourceDocument, checksum: string): VaultRelativePath {
   const extension = path.extname(document.raw_path) || extensionForContentType(document.content_type);
   return `raw/archive/${document.source_app}/${checksum}${extension}`;
+}
+
+function buildArchiveMetadata(
+  document: RawSourceDocument,
+  archivedPath: VaultRelativePath,
+  checksum: string
+): Record<string, string> {
+  return {
+    raw_path: document.raw_path,
+    archived_path: archivedPath,
+    checksum,
+    source_app: document.source_app,
+    source_type: document.source_type,
+    raw_source: document.raw_source,
+    content_type: document.content_type,
+    detected_at: document.detected_at
+  };
 }
 
 function extensionForContentType(contentType: RawSourceDocument["content_type"]): string {

@@ -1,0 +1,31 @@
+name: p2_knowledge_atom_extraction
+status: confirmed_for_p2
+input:
+  records:
+    - record_id
+    - source_app
+    - topic
+    - project
+    - message_time
+    - turn_index
+    - user_excerpt
+    - ai_excerpt
+    - context_summary
+rules:
+  - 只从脱敏后的必要摘录中提炼候选知识原子。
+  - 不输出自由散文，只输出结构化 JSON。
+  - 每条候选必须是单一观点、方法、决策、经验、素材、问题或偏好。
+  - 证据摘录不得超过 300 个中文字符。
+  - 无法判断价值或来源时输出 low confidence。
+output_schema:
+  atoms:
+    - title: string
+      type: 观点|方法|决策|经验|素材|问题|偏好
+      content: string
+      evidence: string
+      source_record_ids:
+        - string
+      tags:
+        - string
+      sensitivity: personal|private|confidential
+      confidence_level: high|medium|low

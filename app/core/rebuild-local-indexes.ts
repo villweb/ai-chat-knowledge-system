@@ -3,7 +3,7 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { parse } from "yaml";
 import type { RawContentType, RawSourceDocument } from "../connectors";
-import type { KnowledgeAtom, SourceApp, VaultRelativePath } from "../schemas";
+import type { KnowledgeAtom, SourceApp, SourceType, VaultRelativePath } from "../schemas";
 import { LocalStorageProvider, resolveVaultPath, toVaultRelativePath } from "../storage";
 import type { WorkspacePaths } from "../storage";
 import { normalizeManualImport } from "./normalize-manual-import";
@@ -22,6 +22,22 @@ export interface RebuildLocalIndexesSummary {
   knowledge_atom_count: number;
 }
 
+interface RawArchiveDocument {
+  document: RawSourceDocument;
+  archived_path: VaultRelativePath;
+}
+
+interface RawArchiveMetadata {
+  raw_path: VaultRelativePath;
+  archived_path: VaultRelativePath;
+  checksum: string;
+  source_app: SourceApp;
+  source_type: SourceType;
+  raw_source: string;
+  content_type: RawContentType;
+  detected_at: string;
+}
+
 export async function rebuildLocalIndexes(input: RebuildLocalIndexesInput): Promise<RebuildLocalIndexesSummary> {
   const paths = buildWorkspacePaths(input);
   const storage = new LocalStorageProvider({
@@ -37,12 +53,12 @@ export async function rebuildLocalIndexes(input: RebuildLocalIndexesInput): Prom
   try {
     await storage.ensureWorkspace(paths);
 
-    const documents = await listRawArchiveDocuments(input.vault_root, input.raw_archive_dir ?? "raw/archive");
-    for (const document of documents) {
-      const checksum = createHash("sha256").update(document.content, "utf8").digest("hex");
-      const records = normalizeManualImport(document).map((record) => ({
+    const archivedDocuments = await listRawArchiveDocuments(input.vault_root, input.raw_archive_dir ?? "raw/archive");
+    for (const archivedDocument of archivedDocuments) {
+      const checksum = createHash("sha256").update(archivedDocument.document.content, "utf8").digest("hex");
+      const records = normalizeManualImport(archivedDocument.document).map((record) => ({
         ...record,
-        raw_archive_path: document.raw_path,
+        raw_archive_path: archivedDocument.archived_path,
         raw_checksum: checksum
       }));
 
@@ -73,30 +89,51 @@ function buildWorkspacePaths(input: RebuildLocalIndexesInput): WorkspacePaths {
   };
 }
 
-async function listRawArchiveDocuments(vaultRoot: string, archiveDir: VaultRelativePath): Promise<RawSourceDocument[]> {
+async function listRawArchiveDocuments(vaultRoot: string, archiveDir: VaultRelativePath): Promise<RawArchiveDocument[]> {
   const root = resolveVaultPath(vaultRoot, archiveDir);
   const files = await listFiles(root);
-  const documents: RawSourceDocument[] = [];
+  const documents: RawArchiveDocument[] = [];
 
   for (const file of files) {
+    if (file.endsWith(".meta.json")) {
+      continue;
+    }
+
     const rawPath = toVaultRelativePath(vaultRoot, file);
     const contentType = getRawContentType(rawPath);
     if (!contentType) {
       continue;
     }
 
+    const content = await readFile(file, "utf8");
+    const metadata = await readArchiveMetadata(file);
     documents.push({
-      source_app: inferSourceAppFromArchivePath(rawPath),
-      source_type: "manual_export",
-      raw_path: rawPath,
-      raw_source: "raw_archive",
-      detected_at: new Date().toISOString(),
-      content_type: contentType,
-      content: await readFile(file, "utf8")
+      archived_path: rawPath,
+      document: {
+        source_app: metadata?.source_app ?? inferSourceAppFromArchivePath(rawPath),
+        source_type: metadata?.source_type ?? "manual_export",
+        raw_path: metadata?.raw_path ?? rawPath,
+        raw_source: metadata?.raw_source ?? "raw_archive",
+        detected_at: metadata?.detected_at ?? new Date().toISOString(),
+        content_type: metadata?.content_type ?? contentType,
+        content
+      }
     });
   }
 
   return documents;
+}
+
+async function readArchiveMetadata(archiveFilePath: string): Promise<RawArchiveMetadata | null> {
+  try {
+    return JSON.parse(await readFile(`${archiveFilePath}.meta.json`, "utf8")) as RawArchiveMetadata;
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") {
+      return null;
+    }
+
+    throw error;
+  }
 }
 
 async function listKnowledgeAtoms(vaultRoot: string, knowledgeDir: VaultRelativePath): Promise<KnowledgeAtom[]> {

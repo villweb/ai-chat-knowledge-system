@@ -24,11 +24,10 @@ export class ManualImportConnector implements SourceConnector {
   constructor(readonly source_app: SourceApp) {}
 
   async listCandidates(input: SourceConnectorListInput): Promise<SourceCandidate[]> {
-    const root = resolveVaultPath(input.vault_root, input.import_root);
-    const candidates = await listImportFiles(root, input.vault_root);
+    const root = resolveVaultPath(input.vault_root, `${input.import_root}/${this.source_app}`);
+    const candidates = await listImportFiles(root, input.vault_root, this.source_app);
 
     return candidates
-      .filter((candidate) => candidate.raw_path.includes(`/imports/${this.source_app}/`))
       .filter((candidate) => !input.since || candidate.detected_at >= input.since);
   }
 
@@ -46,7 +45,7 @@ export class ManualImportConnector implements SourceConnector {
   }
 }
 
-async function listImportFiles(root: string, vaultRoot: string): Promise<SourceCandidate[]> {
+async function listImportFiles(root: string, vaultRoot: string, sourceApp: SourceApp): Promise<SourceCandidate[]> {
   const entries = await readdir(root, { withFileTypes: true });
   const candidates: SourceCandidate[] = [];
 
@@ -54,7 +53,7 @@ async function listImportFiles(root: string, vaultRoot: string): Promise<SourceC
     const absolutePath = path.join(root, entry.name);
 
     if (entry.isDirectory()) {
-      candidates.push(...await listImportFiles(absolutePath, vaultRoot));
+      candidates.push(...await listImportFiles(absolutePath, vaultRoot, sourceApp));
       continue;
     }
 
@@ -68,7 +67,7 @@ async function listImportFiles(root: string, vaultRoot: string): Promise<SourceC
 
     const fileStat = await stat(absolutePath);
     candidates.push({
-      source_app: inferSourceApp(absolutePath),
+      source_app: sourceApp,
       source_type: "manual_export",
       raw_path: toVaultRelativePath(vaultRoot, absolutePath),
       raw_source: "manual_import",
@@ -88,16 +87,4 @@ function getContentType(rawPath: VaultRelativePath): RawContentType {
   }
 
   return contentType;
-}
-
-function inferSourceApp(absolutePath: string): SourceApp {
-  const parts = absolutePath.split(path.sep);
-  const importsIndex = parts.lastIndexOf("imports");
-  const app = parts[importsIndex + 1];
-
-  if (app === "codex" || app === "cursor" || app === "deepseek" || app === "doubao" || app === "workbuddy") {
-    return app;
-  }
-
-  throw new Error(`Cannot infer source app from path: ${absolutePath}`);
 }

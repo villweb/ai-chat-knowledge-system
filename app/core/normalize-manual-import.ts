@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { parse } from "yaml";
 import { SCHEMA_VERSION } from "../schemas";
 import type { RawSourceDocument } from "../connectors";
 import type {
@@ -41,6 +42,7 @@ type ParsedDocument = {
   conversation_id: string;
   project: string;
   topic: string;
+  raw_path: string;
   raw_source: string;
   sensitivity: Sensitivity;
   turns: ParsedTurn[];
@@ -67,7 +69,7 @@ export function normalizeManualImport(document: RawSourceDocument, now = new Dat
       topic: parsed.topic,
       user_message: turn.user_message,
       ai_message: turn.ai_message,
-      raw_path: document.raw_path,
+      raw_path: parsed.raw_path,
       raw_archive_path: document.raw_path,
       raw_checksum: createHash("sha256").update(document.content, "utf8").digest("hex"),
       raw_source: parsed.raw_source,
@@ -99,6 +101,7 @@ function parseJsonDocument(document: RawSourceDocument): ParsedDocument {
     conversation_id: input.conversation_id,
     project: input.project ?? "unknown",
     topic: input.topic ?? "unknown",
+    raw_path: input.raw_path ?? document.raw_path,
     raw_source: input.raw_source ?? document.raw_source,
     sensitivity: parseSensitivity(input.sensitivity)
   };
@@ -136,10 +139,11 @@ function parseMarkdownDocument(document: RawSourceDocument): ParsedDocument {
 
   return {
     conversation_id: requireFrontMatter(frontMatter, "conversation_id"),
-    project: frontMatter.project ?? "unknown",
-    topic: frontMatter.topic ?? "unknown",
-    raw_source: frontMatter.raw_source ?? document.raw_source,
-    sensitivity: parseSensitivity(frontMatter.sensitivity),
+    project: optionalFrontMatter(frontMatter, "project") ?? "unknown",
+    topic: optionalFrontMatter(frontMatter, "topic") ?? "unknown",
+    raw_path: optionalFrontMatter(frontMatter, "raw_path") ?? document.raw_path,
+    raw_source: optionalFrontMatter(frontMatter, "raw_source") ?? document.raw_source,
+    sensitivity: parseSensitivity(optionalFrontMatter(frontMatter, "sensitivity")),
     turns: [
       {
         turn_index: 0,
@@ -147,7 +151,7 @@ function parseMarkdownDocument(document: RawSourceDocument): ParsedDocument {
         message_index_end: 1,
         user_message: userMessage,
         ai_message: aiMessage,
-        message_time: frontMatter.message_time ?? "unknown"
+        message_time: optionalFrontMatter(frontMatter, "message_time") ?? "unknown"
       }
     ]
   };
@@ -158,9 +162,10 @@ function parseTxtDocument(document: RawSourceDocument): ParsedDocument {
   const aiMessage = extractSection(document.content, "AI 回复");
 
   return {
-    conversation_id: createHash("sha256").update(document.raw_path).digest("hex").slice(0, 16),
+    conversation_id: createHash("sha256").update(document.content, "utf8").digest("hex").slice(0, 16),
     project: "unknown",
     topic: "unknown",
+    raw_path: document.raw_path,
     raw_source: document.raw_source,
     sensitivity: "private",
     turns: [
@@ -217,7 +222,7 @@ function pairMessages(messages: JsonMessage[], messageTime: string | "unknown"):
   return turns;
 }
 
-function parseFrontMatter(content: string): { frontMatter: Record<string, string>; body: string } {
+function parseFrontMatter(content: string): { frontMatter: Record<string, unknown>; body: string } {
   if (!content.startsWith("---\n")) {
     throw new Error("Markdown import requires YAML front matter.");
   }
@@ -229,22 +234,7 @@ function parseFrontMatter(content: string): { frontMatter: Record<string, string
 
   const rawFrontMatter = content.slice(4, end);
   const body = content.slice(end + 4);
-  const frontMatter: Record<string, string> = {};
-
-  for (const line of rawFrontMatter.split("\n")) {
-    if (!line.trim()) {
-      continue;
-    }
-
-    const separatorIndex = line.indexOf(":");
-    if (separatorIndex === -1) {
-      throw new Error(`Invalid front matter line: ${line}`);
-    }
-
-    const key = line.slice(0, separatorIndex).trim();
-    const value = line.slice(separatorIndex + 1).trim().replace(/^"(.*)"$/, "$1");
-    frontMatter[key] = value;
-  }
+  const frontMatter = parse(rawFrontMatter) as Record<string, unknown>;
 
   return { frontMatter, body };
 }
@@ -260,14 +250,28 @@ function extractSection(content: string, heading: string): string {
   return match[1].trim();
 }
 
-function requireFrontMatter(frontMatter: Record<string, string>, key: string): string {
-  const value = frontMatter[key];
+function requireFrontMatter(frontMatter: Record<string, unknown>, key: string): string {
+  const value = optionalFrontMatter(frontMatter, key);
 
   if (!value) {
     throw new Error(`Missing required front matter field: ${key}`);
   }
 
   return value;
+}
+
+function optionalFrontMatter(frontMatter: Record<string, unknown>, key: string): string | undefined {
+  const value = frontMatter[key];
+
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (typeof value === "string") {
+    return value;
+  }
+
+  return String(value);
 }
 
 function parseSensitivity(value: string | undefined): Sensitivity {
@@ -285,7 +289,6 @@ function parseSensitivity(value: string | undefined): Sensitivity {
 function createRecordId(document: RawSourceDocument, conversationId: string, turn: ParsedTurn): string {
   const seed = [
     document.source_app,
-    document.raw_path,
     conversationId,
     turn.turn_index,
     turn.message_time,

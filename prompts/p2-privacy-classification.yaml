@@ -1,0 +1,11 @@
+name: p2_privacy_classification
+status: confirmed_for_p2
+rules:
+  - 公司项目、客户信息、合同信息、内部资料默认阻断。
+  - 未声明来源权限的数据默认 private。
+  - 只有显式 personal 且无业务敏感风险的数据才允许进入 AI 提炼。
+  - API Key、本机绝对路径、邮箱、手机号等必须在发送前遮蔽。
+output_schema:
+  sensitivity: personal|private|confidential
+  can_send_to_ai: boolean
+  reason: string
