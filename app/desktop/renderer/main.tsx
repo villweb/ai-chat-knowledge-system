@@ -2,8 +2,11 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Archive,
+  Bell,
   BookOpenCheck,
+  CalendarClock,
   Check,
+  Clock,
   Database,
   FileInput,
   FolderOpen,
@@ -56,6 +59,52 @@ interface LogEvent {
   created_at: string;
 }
 
+interface DailyAutomationSettings {
+  enabled: boolean;
+  run_time_local: string;
+  only_when_idle: boolean;
+  idle_threshold_seconds: number;
+  require_confirmation: boolean;
+  notify_on_complete: boolean;
+  retry_count: number;
+  retry_delay_minutes: number;
+  updated_at: string;
+}
+
+interface DailyRunHistoryItem {
+  run_id: string;
+  run_date: string;
+  status: string;
+  source_apps: string[];
+  generated_atom_count: number;
+  error_summary: string;
+  started_at: string;
+  finished_at: string | null;
+}
+
+interface DailyAutomationDecision {
+  action: string;
+  run_date: string;
+  reason: string;
+  attempt_count: number;
+  next_retry_at?: string;
+}
+
+interface PendingAutomationRun {
+  run_date: string;
+  source_app: string;
+  reason: string;
+  created_at: string;
+}
+
+interface DailyAutomationState {
+  settings: DailyAutomationSettings;
+  history: DailyRunHistoryItem[];
+  decision: DailyAutomationDecision;
+  pending_run: PendingAutomationRun | null;
+  last_decision: DailyAutomationDecision | null;
+}
+
 interface SourceConnectorView {
   source_app: string;
   display_name: string;
@@ -77,6 +126,7 @@ interface DesktopState {
   sourceApp: string;
   aiProvider: string;
   apiKeyConfigured: boolean;
+  automation: DailyAutomationState;
   connectors: SourceConnectorView[];
   events: LogEvent[];
   atoms: KnowledgeAtomDocument[];
@@ -111,6 +161,12 @@ interface DesktopApi {
   updateAtom(input: AtomUpdateInput): Promise<KnowledgeAtomDocument>;
   listLogs(): Promise<LogEvent[]>;
   setConnectorEnabled(input: { sourceApp: string; enabled: boolean }): Promise<unknown>;
+  getAutomationState(): Promise<DailyAutomationState>;
+  saveAutomationSettings(input: Partial<DailyAutomationSettings>): Promise<DailyAutomationState>;
+  confirmAutomationRun(): Promise<DailyAutomationState>;
+  skipAutomationRun(): Promise<DailyAutomationState>;
+  rerunAutomationDate(input: { run_date: string }): Promise<DailyAutomationState>;
+  listAutomationHistory(): Promise<DailyRunHistoryItem[]>;
   saveSessionConfig(input: SessionConfigInput): Promise<DesktopState>;
 }
 
@@ -175,6 +231,7 @@ function getDesktopApi(): DesktopApi {
     sourceApp: "codex",
     aiProvider: "fixture",
     apiKeyConfigured: false,
+    automation: buildPreviewAutomation(),
     connectors: buildPreviewConnectors(),
     events: [sampleLog],
     atoms: [sampleAtom],
@@ -226,12 +283,85 @@ function getDesktopApi(): DesktopApi {
       ));
       return { ok: true };
     },
+    async getAutomationState() {
+      return previewState.automation;
+    },
+    async saveAutomationSettings(input) {
+      previewState.automation = {
+        ...previewState.automation,
+        settings: {
+          ...previewState.automation.settings,
+          ...input,
+          updated_at: new Date().toISOString()
+        }
+      };
+      return previewState.automation;
+    },
+    async confirmAutomationRun() {
+      previewState.automation.pending_run = null;
+      return previewState.automation;
+    },
+    async skipAutomationRun() {
+      previewState.automation.pending_run = null;
+      return previewState.automation;
+    },
+    async rerunAutomationDate(input) {
+      previewState.automation.history = [{
+        run_id: `preview-rerun-${input.run_date}`,
+        run_date: input.run_date,
+        status: "completed",
+        source_apps: ["codex"],
+        generated_atom_count: 1,
+        error_summary: "",
+        started_at: new Date().toISOString(),
+        finished_at: new Date().toISOString()
+      }, ...previewState.automation.history];
+      return previewState.automation;
+    },
+    async listAutomationHistory() {
+      return previewState.automation.history;
+    },
     async saveSessionConfig(input) {
       previewState.sourceApp = input.sourceApp;
       previewState.aiProvider = input.aiProvider;
       previewState.apiKeyConfigured = Boolean(input.apiKey);
       return previewState;
     }
+  };
+}
+
+function buildPreviewAutomation(): DailyAutomationState {
+  const now = new Date().toISOString();
+  return {
+    settings: {
+      enabled: false,
+      run_time_local: "22:30",
+      only_when_idle: true,
+      idle_threshold_seconds: 300,
+      require_confirmation: true,
+      notify_on_complete: true,
+      retry_count: 1,
+      retry_delay_minutes: 10,
+      updated_at: now
+    },
+    history: [{
+      run_id: "preview-history",
+      run_date: now.slice(0, 10),
+      status: "completed",
+      source_apps: ["codex"],
+      generated_atom_count: 1,
+      error_summary: "",
+      started_at: now,
+      finished_at: now
+    }],
+    decision: {
+      action: "disabled",
+      run_date: now.slice(0, 10),
+      reason: "每日自动化未启用。",
+      attempt_count: 0
+    },
+    pending_run: null,
+    last_decision: null
   };
 }
 
@@ -382,7 +512,18 @@ function App() {
         {active === "guide" && <GuidePanel state={state} counts={counts} />}
         {active === "sources" && <SourcesPanel connectors={state.connectors} sourceApp={state.sourceApp} busy={busy} onToggle={(sourceApp, enabled) => withBusy(() => desktopApi.setConnectorEnabled({ sourceApp, enabled }), "连接器状态已更新")} />}
         {active === "import" && <ImportPanel busy={busy} onChoose={() => withBusy(() => desktopApi.chooseImportFiles(state.sourceApp), "文件已导入")} onRun={() => withBusy(() => desktopApi.runImport(), "导入和标准化完成")} />}
-        {active === "run" && <RunPanel busy={busy} events={state.events} onRun={() => withBusy(() => desktopApi.runDaily(), "每日沉淀完成")} />}
+        {active === "run" && (
+          <RunPanel
+            busy={busy}
+            events={state.events}
+            automation={state.automation}
+            onRun={() => withBusy(() => desktopApi.runDaily(), "每日沉淀完成")}
+            onSaveAutomation={(input) => withBusy(() => desktopApi.saveAutomationSettings(input), "每日自动化设置已保存")}
+            onConfirmAutomation={() => withBusy(() => desktopApi.confirmAutomationRun(), "自动运行已确认")}
+            onSkipAutomation={() => withBusy(() => desktopApi.skipAutomationRun(), "已跳过本次自动运行")}
+            onRerunDate={(runDate) => withBusy(() => desktopApi.rerunAutomationDate({ run_date: runDate }), "指定日期已重新运行")}
+          />
+        )}
         {active === "pending" && <PendingPanel atoms={filteredAtoms} counts={counts} query={query} selectedId={selected?.atom.atom_id ?? ""} onQuery={setQuery} onSelect={(atomId) => { setSelectedId(atomId); setActive("detail"); }} />}
         {active === "detail" && selected && <DetailPanel document={selected} atoms={state.atoms} busy={busy} onUpdate={(input) => withBusy(() => desktopApi.updateAtom(input), "知识已更新")} />}
         {active === "settings" && <SettingsPanel state={state} busy={busy} onSave={(input) => withBusy(() => desktopApi.saveSessionConfig(input), "会话配置已保存")} />}
@@ -469,17 +610,95 @@ function ImportPanel({ busy, onChoose, onRun }: { busy: boolean; onChoose: () =>
   );
 }
 
-function RunPanel({ busy, events, onRun }: { busy: boolean; events: LogEvent[]; onRun: () => void }) {
+function RunPanel({
+  busy,
+  events,
+  automation,
+  onRun,
+  onSaveAutomation,
+  onConfirmAutomation,
+  onSkipAutomation,
+  onRerunDate
+}: {
+  busy: boolean;
+  events: LogEvent[];
+  automation: DailyAutomationState;
+  onRun: () => void;
+  onSaveAutomation: (input: Partial<DailyAutomationSettings>) => void;
+  onConfirmAutomation: () => void;
+  onSkipAutomation: () => void;
+  onRerunDate: (runDate: string) => void;
+}) {
+  const [settings, setSettings] = useState(automation.settings);
+  const [rerunDate, setRerunDate] = useState(automation.decision.run_date);
+
+  useEffect(() => {
+    setSettings(automation.settings);
+    setRerunDate(automation.decision.run_date);
+  }, [automation.settings.updated_at, automation.decision.run_date]);
+
+  function updateSetting<K extends keyof DailyAutomationSettings>(key: K, value: DailyAutomationSettings[K]) {
+    setSettings((current) => ({ ...current, [key]: value }));
+  }
+
   return (
     <div className="grid twoWide">
       <section className="panel">
         <h2>每日运行</h2>
         <p className="muted">串联导入、标准化、P2 候选提炼和每日摘要。</p>
-        <button className="primary" onClick={onRun} disabled={busy}><Play size={17} /><span>开始</span></button>
+        <div className="actions runActions">
+          <button className="primary" onClick={onRun} disabled={busy}><Play size={17} />立即运行</button>
+          <button onClick={() => onRerunDate(rerunDate)} disabled={busy || !rerunDate}><CalendarClock size={16} />重跑日期</button>
+        </div>
+        <label className="fullField compactField">重跑日期<input type="date" value={rerunDate} onChange={(event) => setRerunDate(event.target.value)} /></label>
+        {automation.pending_run && (
+          <div className="pendingAutomation">
+            <strong>等待确认：{automation.pending_run.run_date}</strong>
+            <span>{automation.pending_run.reason}</span>
+            <div className="actions">
+              <button className="primary" onClick={onConfirmAutomation} disabled={busy}><Check size={16} />确认运行</button>
+              <button onClick={onSkipAutomation} disabled={busy}><X size={16} />跳过本次</button>
+            </div>
+          </div>
+        )}
+        <div className="automationStatus">
+          <Clock size={16} />
+          <span>{automation.decision.reason}</span>
+        </div>
       </section>
+
+      <section className="panel">
+        <h2>自动化设置</h2>
+        <div className="formGrid">
+          <label>启用自动运行<select value={settings.enabled ? "yes" : "no"} onChange={(event) => updateSetting("enabled", event.target.value === "yes")}><option value="no">关闭</option><option value="yes">开启</option></select></label>
+          <label>运行时间<input type="time" value={settings.run_time_local} onChange={(event) => updateSetting("run_time_local", event.target.value)} /></label>
+          <label>仅空闲时运行<select value={settings.only_when_idle ? "yes" : "no"} onChange={(event) => updateSetting("only_when_idle", event.target.value === "yes")}><option value="yes">开启</option><option value="no">关闭</option></select></label>
+          <label>空闲秒数<input type="number" min="0" value={settings.idle_threshold_seconds} onChange={(event) => updateSetting("idle_threshold_seconds", Number(event.target.value))} /></label>
+          <label>运行前确认<select value={settings.require_confirmation ? "yes" : "no"} onChange={(event) => updateSetting("require_confirmation", event.target.value === "yes")}><option value="yes">需要</option><option value="no">不需要</option></select></label>
+          <label>完成通知<select value={settings.notify_on_complete ? "yes" : "no"} onChange={(event) => updateSetting("notify_on_complete", event.target.value === "yes")}><option value="yes">开启</option><option value="no">关闭</option></select></label>
+          <label>重试次数<input type="number" min="0" value={settings.retry_count} onChange={(event) => updateSetting("retry_count", Number(event.target.value))} /></label>
+          <label>重试间隔分钟<input type="number" min="0" value={settings.retry_delay_minutes} onChange={(event) => updateSetting("retry_delay_minutes", Number(event.target.value))} /></label>
+        </div>
+        <button className="primary" onClick={() => onSaveAutomation(settings)} disabled={busy}><Bell size={17} /><span>保存自动化</span></button>
+      </section>
+
       <section className="panel">
         <h2>运行进度</h2>
         <EventList events={events} />
+      </section>
+
+      <section className="panel">
+        <h2>运行历史</h2>
+        <div className="historyList">
+          {automation.history.slice(0, 12).map((item) => (
+            <div className="historyRow" key={item.run_id}>
+              <strong>{item.run_date} · {item.status}</strong>
+              <span>{item.source_apps.join(", ") || "unknown"} · 生成 {item.generated_atom_count}</span>
+              <small>{item.error_summary || item.run_id}</small>
+            </div>
+          ))}
+          {automation.history.length === 0 && <p className="muted">暂无运行历史</p>}
+        </div>
       </section>
     </div>
   );

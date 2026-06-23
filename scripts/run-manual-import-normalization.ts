@@ -5,6 +5,8 @@ import type { SourceApp } from "../app/schemas";
 type CliOptions = {
   vault_root: string;
   source_app: SourceApp;
+  run_id?: string;
+  run_date?: string;
 };
 
 const SOURCE_APPS = new Set<SourceApp>(["codex", "cursor", "deepseek", "doubao", "workbuddy"]);
@@ -32,8 +34,18 @@ function parseArgs(args: string[]): CliOptions {
     throw new Error(`Unsupported source app: ${sourceApp}`);
   }
 
-  return {
+  const result: CliOptions = {
     vault_root: values.get("vault-root") ?? process.cwd(),
     source_app: sourceApp as SourceApp
   };
+  const runId = values.get("run-id");
+  const runDate = values.get("run-date");
+  if (runId) {
+    result.run_id = runId;
+  }
+  if (runDate) {
+    result.run_date = runDate;
+  }
+
+  return result;
 }

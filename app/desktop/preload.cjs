@@ -10,5 +10,11 @@ contextBridge.exposeInMainWorld("desktopApi", {
   updateAtom: (input) => ipcRenderer.invoke("atoms:update", input),
   listLogs: () => ipcRenderer.invoke("logs:list"),
   setConnectorEnabled: (input) => ipcRenderer.invoke("connectors:set-enabled", input),
+  getAutomationState: () => ipcRenderer.invoke("automation:get-state"),
+  saveAutomationSettings: (input) => ipcRenderer.invoke("automation:save-settings", input),
+  confirmAutomationRun: () => ipcRenderer.invoke("automation:confirm-run"),
+  skipAutomationRun: () => ipcRenderer.invoke("automation:skip-run"),
+  rerunAutomationDate: (input) => ipcRenderer.invoke("automation:rerun-date", input),
+  listAutomationHistory: () => ipcRenderer.invoke("automation:list-history"),
   saveSessionConfig: (input) => ipcRenderer.invoke("settings:save-session-config", input)
 });

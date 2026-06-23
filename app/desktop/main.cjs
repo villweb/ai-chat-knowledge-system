@@ -1,10 +1,11 @@
-const { app, BrowserWindow, dialog, ipcMain } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, Notification, powerMonitor } = require("electron");
 const { spawn } = require("node:child_process");
-const { copyFile, mkdir, readdir, readFile } = require("node:fs/promises");
+const { copyFile, mkdir, readdir, readFile, writeFile } = require("node:fs/promises");
 const path = require("node:path");
 
 const repoRoot = path.resolve(__dirname, "../..");
 const sourceApps = ["codex", "cursor", "deepseek", "doubao", "workbuddy"];
+const AUTOMATION_CHECK_MS = 30_000;
 const state = {
   vaultRoot: repoRoot,
   sourceApp: "codex",
@@ -19,6 +20,10 @@ const state = {
   },
   events: []
 };
+let automationTimer = null;
+let automationRunning = false;
+let pendingAutomationRun = null;
+let lastAutomationDecision = null;
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -46,6 +51,7 @@ function createWindow() {
 app.whenReady().then(() => {
   registerIpc();
   createWindow();
+  startAutomationTimer();
 });
 
 app.on("window-all-closed", () => {
@@ -63,6 +69,7 @@ app.on("activate", () => {
 function registerIpc() {
   ipcMain.handle("app:get-state", async () => ({
     ...state,
+    automation: await getAutomationState(),
     connectors: await listConnectors(),
     atoms: await listAtoms(),
     logs: await listLogs()
@@ -159,32 +166,7 @@ function registerIpc() {
   });
 
   ipcMain.handle("workflow:run-daily", async () => {
-    ensureSourceEnabled(state.sourceApp);
-    const importResult = await runScript("scripts/run-manual-import-normalization.ts", [
-      "--source-app",
-      state.sourceApp,
-      "--vault-root",
-      state.vaultRoot
-    ]);
-    if (!importResult.ok) {
-      pushEvent("daily_run", importResult.stderr);
-      throw new Error(importResult.stderr || "导入失败，已停止每日运行。");
-    }
-
-    const extractResult = await runScript("scripts/extract-knowledge-atoms.ts", [
-      "--source-app",
-      state.sourceApp,
-      "--provider",
-      state.aiProvider,
-      "--allow-ai",
-      "--vault-root",
-      state.vaultRoot
-    ]);
-    if (!extractResult.ok) {
-      pushEvent("daily_run", extractResult.stderr);
-      throw new Error(extractResult.stderr || "知识提炼失败。");
-    }
-
+    const { importResult, extractResult } = await runDailyWorkflow();
     pushEvent("daily_run", "每日沉淀完成。");
     return { importResult, extractResult };
   });
@@ -202,6 +184,51 @@ function registerIpc() {
   });
 
   ipcMain.handle("logs:list", async () => listLogs());
+
+  ipcMain.handle("automation:get-state", async () => getAutomationState());
+
+  ipcMain.handle("automation:save-settings", async (_event, input) => {
+    const result = await runScript("scripts/daily-automation.ts", ["save-settings", "--vault-root", state.vaultRoot], JSON.stringify(input));
+    if (!result.ok) {
+      throw new Error(result.stderr || "保存自动化设置失败。");
+    }
+    pushEvent("automation_settings_saved", "每日自动化设置已保存。");
+    await checkAutomation();
+    return getAutomationState();
+  });
+
+  ipcMain.handle("automation:confirm-run", async () => {
+    if (!pendingAutomationRun) {
+      throw new Error("当前没有等待确认的自动运行。");
+    }
+
+    const runDate = pendingAutomationRun.run_date;
+    pendingAutomationRun = null;
+    await runAutomationDate(runDate, "confirmed");
+    return getAutomationState();
+  });
+
+  ipcMain.handle("automation:skip-run", async () => {
+    if (!pendingAutomationRun) {
+      throw new Error("当前没有等待跳过的自动运行。");
+    }
+
+    await writeAutomationCancelledRun(pendingAutomationRun.run_date, `auto_daily_${pendingAutomationRun.run_date}_${Date.now()}_extract_cancelled`);
+    pushEvent("automation_skipped", `已跳过 ${pendingAutomationRun.run_date} 的自动运行。`);
+    pendingAutomationRun = null;
+    return getAutomationState();
+  });
+
+  ipcMain.handle("automation:rerun-date", async (_event, input) => {
+    if (!input?.run_date) {
+      throw new Error("缺少重跑日期。");
+    }
+
+    await runAutomationDate(input.run_date, "manual_rerun");
+    return getAutomationState();
+  });
+
+  ipcMain.handle("automation:list-history", async () => listDailyRunHistory());
 }
 
 function runCommand(command, args, stdin) {
@@ -255,6 +282,211 @@ async function listConnectors() {
   return JSON.parse(result.stdout);
 }
 
+async function getAutomationState() {
+  const result = await runScript("scripts/daily-automation.ts", [
+    "get-state",
+    "--vault-root",
+    state.vaultRoot,
+    "--idle-seconds",
+    String(getIdleSeconds())
+  ]);
+  if (!result.ok) {
+    throw new Error(result.stderr || "读取每日自动化状态失败。");
+  }
+
+  const automationState = JSON.parse(result.stdout);
+  return {
+    ...automationState,
+    pending_run: pendingAutomationRun,
+    last_decision: lastAutomationDecision
+  };
+}
+
+async function listDailyRunHistory() {
+  const result = await runScript("scripts/daily-automation.ts", ["list-history", "--vault-root", state.vaultRoot]);
+  if (!result.ok) {
+    throw new Error(result.stderr || "读取运行历史失败。");
+  }
+
+  return JSON.parse(result.stdout);
+}
+
+function startAutomationTimer() {
+  if (automationTimer) {
+    clearInterval(automationTimer);
+  }
+
+  automationTimer = setInterval(() => {
+    void checkAutomation();
+  }, AUTOMATION_CHECK_MS);
+  void checkAutomation();
+}
+
+async function checkAutomation() {
+  if (automationRunning || pendingAutomationRun) {
+    return;
+  }
+
+  try {
+    const automationState = await getAutomationState();
+    const decision = automationState.decision;
+    lastAutomationDecision = decision;
+
+    if (decision.action === "pending_confirmation") {
+      pendingAutomationRun = {
+        run_date: decision.run_date,
+        source_app: state.sourceApp,
+        reason: decision.reason,
+        created_at: new Date().toISOString()
+      };
+      pushEvent("automation_pending_confirmation", `每日自动运行等待确认：${decision.run_date}`);
+      showNotification("每日沉淀等待确认", "到达计划运行时间，请在应用内确认后开始。");
+      return;
+    }
+
+    if (decision.action === "run_now" || decision.action === "retry_now") {
+      await runAutomationDate(decision.run_date, decision.action);
+    }
+  } catch (error) {
+    pushEvent("automation_check_failed", toErrorMessage(error));
+  }
+}
+
+async function runAutomationDate(runDate, reason) {
+  ensureSourceEnabled(state.sourceApp);
+  if (automationRunning) {
+    throw new Error("每日沉淀正在运行中。");
+  }
+
+  automationRunning = true;
+  const runIdPrefix = `auto_daily_${runDate}_${Date.now()}`;
+  try {
+    pushEvent("automation_run_started", `开始自动每日沉淀：${runDate}`);
+    const result = await runDailyWorkflow(runDate, runIdPrefix);
+    pushEvent("automation_run_completed", `自动每日沉淀完成：${runDate}`);
+    const automationState = await getAutomationState();
+    if (automationState.settings.notify_on_complete) {
+      showNotification("每日沉淀完成", `已完成 ${runDate} 的自动沉淀。`);
+    }
+    return result;
+  } catch (error) {
+    const message = toErrorMessage(error);
+    await writeAutomationFailureRun(runDate, `${runIdPrefix}_extract_failed`, message);
+    pushEvent("automation_run_failed", message);
+    showNotification("每日沉淀失败", message);
+    throw error;
+  } finally {
+    automationRunning = false;
+    lastAutomationDecision = {
+      action: "completed_check",
+      run_date: runDate,
+      reason,
+      attempt_count: 0
+    };
+  }
+}
+
+async function runDailyWorkflow(runDate, runIdPrefix) {
+  ensureSourceEnabled(state.sourceApp);
+  const importArgs = [
+    "--source-app",
+    state.sourceApp,
+    "--vault-root",
+    state.vaultRoot
+  ];
+  const extractArgs = [
+    "--source-app",
+    state.sourceApp,
+    "--provider",
+    state.aiProvider,
+    "--allow-ai",
+    "--vault-root",
+    state.vaultRoot
+  ];
+  if (runDate && runIdPrefix) {
+    importArgs.push("--run-date", runDate, "--run-id", `${runIdPrefix}_import`);
+    extractArgs.push("--run-date", runDate, "--run-id", `${runIdPrefix}_extract`);
+  }
+
+  const importResult = await runScript("scripts/run-manual-import-normalization.ts", importArgs);
+  if (!importResult.ok) {
+    pushEvent("daily_run", importResult.stderr);
+    throw new Error(importResult.stderr || "导入失败，已停止每日运行。");
+  }
+
+  const extractResult = await runScript("scripts/extract-knowledge-atoms.ts", extractArgs);
+  if (!extractResult.ok) {
+    pushEvent("daily_run", extractResult.stderr);
+    throw new Error(extractResult.stderr || "知识提炼失败。");
+  }
+
+  return { importResult, extractResult };
+}
+
+async function writeAutomationFailureRun(runDate, runId, message) {
+  const now = new Date().toISOString();
+  const dailyRun = {
+    schema_version: "daily_run.v1",
+    run_id: runId,
+    run_date: runDate,
+    status: "failed",
+    started_at: now,
+    finished_at: now,
+    source_apps: [state.sourceApp],
+    imported_raw_paths: [],
+    normalized_record_ids: [],
+    generated_atom_ids: [],
+    errors: [{
+      code: "automation_run_failed",
+      message,
+      source_app: state.sourceApp
+    }],
+    created_at: now,
+    updated_at: now
+  };
+  const filePath = path.join(state.vaultRoot, "data/daily_runs", `${runId}.json`);
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, `${JSON.stringify(dailyRun, null, 2)}\n`, "utf8");
+}
+
+async function writeAutomationCancelledRun(runDate, runId) {
+  const now = new Date().toISOString();
+  const dailyRun = {
+    schema_version: "daily_run.v1",
+    run_id: runId,
+    run_date: runDate,
+    status: "cancelled",
+    started_at: now,
+    finished_at: now,
+    source_apps: [state.sourceApp],
+    imported_raw_paths: [],
+    normalized_record_ids: [],
+    generated_atom_ids: [],
+    errors: [],
+    created_at: now,
+    updated_at: now
+  };
+  const filePath = path.join(state.vaultRoot, "data/daily_runs", `${runId}.json`);
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, `${JSON.stringify(dailyRun, null, 2)}\n`, "utf8");
+}
+
+function getIdleSeconds() {
+  try {
+    return powerMonitor.getSystemIdleTime();
+  } catch {
+    return 0;
+  }
+}
+
+function showNotification(title, body) {
+  if (!Notification.isSupported()) {
+    return;
+  }
+
+  new Notification({ title, body }).show();
+}
+
 function isSourceEnabled(sourceApp) {
   return Boolean(state.enabledConnectors[sourceApp]);
 }
@@ -292,4 +524,12 @@ function pushEvent(type, message) {
     created_at: new Date().toISOString()
   });
   state.events = state.events.slice(0, 40);
+}
+
+function toErrorMessage(error) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return String(error);
 }

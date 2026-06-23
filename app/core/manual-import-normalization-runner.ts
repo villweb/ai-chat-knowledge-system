@@ -19,6 +19,7 @@ export interface ManualImportNormalizationInput {
   vault_root: string;
   source_app: SourceApp;
   run_id?: string;
+  run_date?: string;
   raw_imports_dir?: VaultRelativePath;
   sqlite_path?: VaultRelativePath;
   knowledge_dir?: VaultRelativePath;
@@ -137,7 +138,7 @@ export async function runManualImportNormalization(
     await storage.saveDailyRun({
       schema_version: SCHEMA_VERSION.dailyRun,
       run_id: runId,
-      run_date: finishedAt.slice(0, 10),
+      run_date: input.run_date ?? finishedAt.slice(0, 10),
       status: summary.failed_file_count > 0 ? "failed" : "completed",
       started_at: startedAt,
       finished_at: finishedAt,

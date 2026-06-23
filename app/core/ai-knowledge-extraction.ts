@@ -27,6 +27,7 @@ export interface ExtractKnowledgeAtomsInput {
   provider: KnowledgeExtractionProviderName;
   source_app?: SourceApp;
   run_id?: string;
+  run_date?: string;
   max_records?: number;
   sqlite_path?: VaultRelativePath;
   knowledge_dir?: VaultRelativePath;
@@ -176,7 +177,7 @@ export async function extractKnowledgeAtoms(
     await storage.saveDailyRun({
       schema_version: SCHEMA_VERSION.dailyRun,
       run_id: runId,
-      run_date: now.slice(0, 10),
+      run_date: input.run_date ?? now.slice(0, 10),
       status: "completed",
       started_at: now,
       finished_at: new Date().toISOString(),

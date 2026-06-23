@@ -528,6 +528,18 @@ nav {
   line-height: 1.65;
 }
 
+.compactField {
+  margin-top: 12px;
+}
+
+.compactField input {
+  height: 40px;
+  padding: 0 10px;
+  border: 1px solid #d8e0dd;
+  border-radius: 8px;
+  outline: 0;
+}
+
 .evidence {
   display: grid;
   gap: 6px;
@@ -551,6 +563,10 @@ nav {
   gap: 8px;
 }
 
+.runActions {
+  margin-top: 14px;
+}
+
 .actions button {
   min-width: 96px;
   padding: 0 12px;
@@ -561,6 +577,59 @@ nav {
 
 .actions button:hover {
   background: #f2f7f4;
+}
+
+.pendingAutomation,
+.automationStatus {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid #dbe3e0;
+  border-radius: 8px;
+  background: #f7f9f8;
+}
+
+.pendingAutomation span,
+.automationStatus span {
+  color: #55645f;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.automationStatus {
+  display: flex;
+  align-items: center;
+}
+
+.historyList {
+  display: grid;
+  gap: 8px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.historyRow {
+  display: grid;
+  gap: 5px;
+  padding: 10px 12px;
+  border: 1px solid #dce3e0;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.historyRow strong,
+.historyRow span,
+.historyRow small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.historyRow span,
+.historyRow small {
+  color: #64736e;
+  font-size: 13px;
 }
 
 .settingsPanel {

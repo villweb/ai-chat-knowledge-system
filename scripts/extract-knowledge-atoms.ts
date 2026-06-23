@@ -10,6 +10,8 @@ type CliOptions = {
   allow_ai: boolean;
   provider: KnowledgeExtractionProviderName;
   source_app?: SourceApp;
+  run_id?: string;
+  run_date?: string;
 };
 
 const options = parseArgs(process.argv.slice(2));
@@ -54,10 +56,20 @@ function parseArgs(args: string[]): CliOptions {
     throw new Error(`Unsupported source app: ${sourceApp}`);
   }
 
-  return {
+  const result: CliOptions = {
     vault_root: String(values.get("vault-root") ?? process.cwd()),
     allow_ai: values.get("allow-ai") === true,
     provider,
     ...(sourceApp ? { source_app: sourceApp } : {})
   };
+  const runId = values.get("run-id");
+  const runDate = values.get("run-date");
+  if (runId) {
+    result.run_id = String(runId);
+  }
+  if (runDate) {
+    result.run_date = String(runDate);
+  }
+
+  return result;
 }
