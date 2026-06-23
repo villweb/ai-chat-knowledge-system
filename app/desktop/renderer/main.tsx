@@ -5,11 +5,15 @@ import {
   Bell,
   BookOpenCheck,
   CalendarClock,
+  CalendarDays,
   Check,
   Clock,
   Database,
+  Download,
   FileInput,
+  Filter,
   FolderOpen,
+  HardDriveDownload,
   ListChecks,
   Play,
   RefreshCw,
@@ -24,7 +28,7 @@ import "./styles.css";
 
 type ReviewStatus = "pending" | "approved" | "rejected" | "merged";
 type KnowledgeAtomType = "观点" | "方法" | "决策" | "经验" | "素材" | "问题" | "偏好";
-type NavKey = "guide" | "sources" | "import" | "run" | "pending" | "detail" | "settings" | "logs";
+type NavKey = "guide" | "sources" | "import" | "run" | "library" | "pending" | "detail" | "settings" | "logs";
 type SourceConnectorStatus = "available" | "reserved";
 
 interface KnowledgeAtom {
@@ -105,6 +109,40 @@ interface DailyAutomationState {
   last_decision: DailyAutomationDecision | null;
 }
 
+interface KnowledgeFacetItem {
+  value: string;
+  count: number;
+}
+
+interface DuplicateKnowledgeGroup {
+  key: string;
+  title: string;
+  atom_ids: string[];
+  items: KnowledgeAtomDocument[];
+}
+
+interface DailyKnowledgeCalendarItem {
+  date: string;
+  run_count: number;
+  generated_atom_count: number;
+  approved_atom_count: number;
+  pending_atom_count: number;
+  failed_run_count: number;
+}
+
+interface KnowledgeLibraryView {
+  items: KnowledgeAtomDocument[];
+  facets: {
+    source_apps: KnowledgeFacetItem[];
+    types: KnowledgeFacetItem[];
+    projects: KnowledgeFacetItem[];
+    tags: KnowledgeFacetItem[];
+    statuses: KnowledgeFacetItem[];
+  };
+  duplicate_groups: DuplicateKnowledgeGroup[];
+  calendar: DailyKnowledgeCalendarItem[];
+}
+
 interface SourceConnectorView {
   source_app: string;
   display_name: string;
@@ -130,6 +168,7 @@ interface DesktopState {
   connectors: SourceConnectorView[];
   events: LogEvent[];
   atoms: KnowledgeAtomDocument[];
+  knowledge: KnowledgeLibraryView;
   logs: LogEvent[];
 }
 
@@ -159,6 +198,11 @@ interface DesktopApi {
   runDaily(): Promise<unknown>;
   listAtoms(): Promise<KnowledgeAtomDocument[]>;
   updateAtom(input: AtomUpdateInput): Promise<KnowledgeAtomDocument>;
+  getKnowledgeView(input: Record<string, unknown>): Promise<KnowledgeLibraryView>;
+  exportKnowledgeMarkdown(): Promise<unknown>;
+  ensureObsidianCompatibility(): Promise<unknown>;
+  backupKnowledge(): Promise<unknown>;
+  restoreLatestKnowledgeBackup(): Promise<unknown>;
   listLogs(): Promise<LogEvent[]>;
   setConnectorEnabled(input: { sourceApp: string; enabled: boolean }): Promise<unknown>;
   getAutomationState(): Promise<DailyAutomationState>;
@@ -184,6 +228,7 @@ const navItems: Array<{ key: NavKey; label: string; icon: React.ComponentType<{ 
   { key: "sources", label: "来源", icon: Database },
   { key: "import", label: "导入", icon: FileInput },
   { key: "run", label: "运行", icon: Play },
+  { key: "library", label: "知识库", icon: BookOpenCheck },
   { key: "pending", label: "待确认", icon: ListChecks },
   { key: "detail", label: "详情", icon: SquarePen },
   { key: "settings", label: "设置", icon: Settings },
@@ -216,6 +261,15 @@ function getDesktopApi(): DesktopApi {
       updated_at: new Date().toISOString()
     }
   };
+  const duplicateAtom: KnowledgeAtomDocument = {
+    file_path: "knowledge/inbox/2026/preview-duplicate.md",
+    atom: {
+      ...sampleAtom.atom,
+      atom_id: "preview-duplicate",
+      title: "预览知识卡片",
+      updated_at: new Date(Date.now() - 60_000).toISOString()
+    }
+  };
 
   const sampleLog: LogEvent = {
     event_id: "preview-log",
@@ -234,7 +288,8 @@ function getDesktopApi(): DesktopApi {
     automation: buildPreviewAutomation(),
     connectors: buildPreviewConnectors(),
     events: [sampleLog],
-    atoms: [sampleAtom],
+    atoms: [sampleAtom, duplicateAtom],
+    knowledge: buildPreviewKnowledge([sampleAtom, duplicateAtom]),
     logs: [sampleLog]
   };
 
@@ -272,7 +327,23 @@ function getDesktopApi(): DesktopApi {
           }
         };
       });
+      previewState.knowledge = buildPreviewKnowledge(previewState.atoms);
       return previewState.atoms.find((item) => item.atom.atom_id === input.atom_id) ?? sampleAtom;
+    },
+    async getKnowledgeView() {
+      return previewState.knowledge;
+    },
+    async exportKnowledgeMarkdown() {
+      return { export_dir: "data/exports/preview", exported_file_count: previewState.atoms.length };
+    },
+    async ensureObsidianCompatibility() {
+      return { index_path: "knowledge/_index.md", exported_file_count: previewState.atoms.length };
+    },
+    async backupKnowledge() {
+      return { backup_dir: "data/backups/preview", copied_dir_count: 4 };
+    },
+    async restoreLatestKnowledgeBackup() {
+      return { backup_dir: "data/backups/preview", restored_dir_count: 4 };
     },
     async listLogs() {
       return previewState.logs;
@@ -327,6 +398,34 @@ function getDesktopApi(): DesktopApi {
       previewState.apiKeyConfigured = Boolean(input.apiKey);
       return previewState;
     }
+  };
+}
+
+function buildPreviewKnowledge(items: KnowledgeAtomDocument[]): KnowledgeLibraryView {
+  const now = new Date().toISOString().slice(0, 10);
+  return {
+    items,
+    facets: {
+      source_apps: [{ value: "codex", count: items.length }],
+      types: [{ value: "观点", count: items.length }],
+      projects: [{ value: "personal", count: items.length }],
+      tags: [{ value: "preview", count: items.length }, { value: "desktop", count: items.length }],
+      statuses: [{ value: "pending", count: items.filter((item) => item.atom.review_status === "pending").length }]
+    },
+    duplicate_groups: [{
+      key: "preview",
+      title: "预览知识卡片",
+      atom_ids: items.map((item) => item.atom.atom_id),
+      items
+    }],
+    calendar: [{
+      date: now,
+      run_count: 1,
+      generated_atom_count: items.length,
+      approved_atom_count: 0,
+      pending_atom_count: items.length,
+      failed_run_count: 0
+    }]
   };
 }
 
@@ -524,6 +623,19 @@ function App() {
             onRerunDate={(runDate) => withBusy(() => desktopApi.rerunAutomationDate({ run_date: runDate }), "指定日期已重新运行")}
           />
         )}
+        {active === "library" && (
+          <LibraryPanel
+            atoms={state.atoms}
+            knowledge={state.knowledge}
+            busy={busy}
+            onSelect={(atomId) => { setSelectedId(atomId); setActive("detail"); }}
+            onMerge={(atomId, targetId) => withBusy(() => desktopApi.updateAtom({ atom_id: atomId, review_status: "merged", merged_into: targetId }), "知识已合并")}
+            onExport={() => withBusy(() => desktopApi.exportKnowledgeMarkdown(), "Markdown 导出完成")}
+            onObsidian={() => withBusy(() => desktopApi.ensureObsidianCompatibility(), "Obsidian 索引已更新")}
+            onBackup={() => withBusy(() => desktopApi.backupKnowledge(), "知识库备份已创建")}
+            onRestore={() => withBusy(() => desktopApi.restoreLatestKnowledgeBackup(), "最近备份已恢复")}
+          />
+        )}
         {active === "pending" && <PendingPanel atoms={filteredAtoms} counts={counts} query={query} selectedId={selected?.atom.atom_id ?? ""} onQuery={setQuery} onSelect={(atomId) => { setSelectedId(atomId); setActive("detail"); }} />}
         {active === "detail" && selected && <DetailPanel document={selected} atoms={state.atoms} busy={busy} onUpdate={(input) => withBusy(() => desktopApi.updateAtom(input), "知识已更新")} />}
         {active === "settings" && <SettingsPanel state={state} busy={busy} onSave={(input) => withBusy(() => desktopApi.saveSessionConfig(input), "会话配置已保存")} />}
@@ -704,6 +816,113 @@ function RunPanel({
   );
 }
 
+function LibraryPanel({
+  atoms,
+  knowledge,
+  busy,
+  onSelect,
+  onMerge,
+  onExport,
+  onObsidian,
+  onBackup,
+  onRestore
+}: {
+  atoms: KnowledgeAtomDocument[];
+  knowledge: KnowledgeLibraryView;
+  busy: boolean;
+  onSelect: (atomId: string) => void;
+  onMerge: (atomId: string, targetId: string) => void;
+  onExport: () => void;
+  onObsidian: () => void;
+  onBackup: () => void;
+  onRestore: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [sourceApp, setSourceApp] = useState("");
+  const [type, setType] = useState("");
+  const [project, setProject] = useState("");
+  const [tag, setTag] = useState("");
+  const [status, setStatus] = useState("");
+  const filtered = useMemo(() => filterKnowledgeItems(atoms, { query, sourceApp, type, project, tag, status }), [atoms, query, sourceApp, type, project, tag, status]);
+
+  return (
+    <div className="libraryLayout">
+      <section className="panel">
+        <div className="listHeader">
+          <div className="statusPills">
+            <span>全部 {atoms.length}</span>
+            {knowledge.facets.statuses.map((item) => <span key={item.value}>{item.value} {item.count}</span>)}
+          </div>
+          <label className="search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索标题、正文、证据、标签" /></label>
+        </div>
+        <div className="filterGrid">
+          <label><Filter size={15} />来源<select value={sourceApp} onChange={(event) => setSourceApp(event.target.value)}><option value="">全部</option>{knowledge.facets.source_apps.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select></label>
+          <label><Filter size={15} />类型<select value={type} onChange={(event) => setType(event.target.value)}><option value="">全部</option>{knowledge.facets.types.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select></label>
+          <label><Filter size={15} />项目<select value={project} onChange={(event) => setProject(event.target.value)}><option value="">全部</option>{knowledge.facets.projects.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select></label>
+          <label><Filter size={15} />标签<select value={tag} onChange={(event) => setTag(event.target.value)}><option value="">全部</option>{knowledge.facets.tags.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select></label>
+          <label><Filter size={15} />状态<select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">全部</option>{knowledge.facets.statuses.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select></label>
+        </div>
+        <div className="libraryToolbar">
+          <button onClick={onExport} disabled={busy}><Download size={16} />导出 Markdown</button>
+          <button onClick={onObsidian} disabled={busy}><BookOpenCheck size={16} />Obsidian 索引</button>
+          <button onClick={onBackup} disabled={busy}><HardDriveDownload size={16} />备份</button>
+          <button onClick={onRestore} disabled={busy}><RefreshCw size={16} />恢复最近备份</button>
+        </div>
+      </section>
+
+      <section className="panel libraryResults">
+        <h2>知识列表</h2>
+        <div className="atomList">
+          {filtered.map((item) => (
+            <button key={item.atom.atom_id} className="atomRow" onClick={() => onSelect(item.atom.atom_id)}>
+              <strong>{item.atom.title}</strong>
+              <span>{item.atom.type} · {item.atom.review_status} · {item.atom.source_app} · {item.atom.project || "未分项目"}</span>
+              <small>{item.atom.tags.join(", ") || item.atom.evidence}</small>
+            </button>
+          ))}
+          {filtered.length === 0 && <p className="muted">暂无匹配知识</p>}
+        </div>
+      </section>
+
+      <section className="panel">
+        <h2>重复合并</h2>
+        <div className="duplicateList">
+          {knowledge.duplicate_groups.map((group) => {
+            const target = group.items[0];
+            return (
+              <div className="duplicateGroup" key={group.key}>
+                <strong>{group.title}</strong>
+                <span>{group.items.length} 条相似知识</span>
+                {group.items.map((item) => (
+                  <div className="duplicateRow" key={item.atom.atom_id}>
+                    <button onClick={() => onSelect(item.atom.atom_id)}>{item.atom.title}</button>
+                    {target && item.atom.atom_id !== target.atom.atom_id && <button onClick={() => onMerge(item.atom.atom_id, target.atom.atom_id)} disabled={busy}><Split size={15} />合并到首条</button>}
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+          {knowledge.duplicate_groups.length === 0 && <p className="muted">暂无重复建议</p>}
+        </div>
+      </section>
+
+      <section className="panel">
+        <h2>沉淀日历</h2>
+        <div className="calendarList">
+          {knowledge.calendar.slice(0, 18).map((item) => (
+            <div className="calendarRow" key={item.date}>
+              <CalendarDays size={16} />
+              <strong>{item.date}</strong>
+              <span>运行 {item.run_count} · 生成 {item.generated_atom_count} · 批准 {item.approved_atom_count} · 待确认 {item.pending_atom_count} · 失败 {item.failed_run_count}</span>
+            </div>
+          ))}
+          {knowledge.calendar.length === 0 && <p className="muted">暂无沉淀记录</p>}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function PendingPanel({ atoms, counts, query, selectedId, onQuery, onSelect }: { atoms: KnowledgeAtomDocument[]; counts: Record<ReviewStatus, number>; query: string; selectedId: string; onQuery: (value: string) => void; onSelect: (atomId: string) => void }) {
   return (
     <section className="panel fill">
@@ -833,12 +1052,54 @@ function subtitleFor(active: NavKey): string {
     sources: "来源启用状态和后续连接器边界",
     import: "手动导入本地导出文件",
     run: "执行每日沉淀流程",
+    library: "搜索、筛选、合并、日历和导出",
     pending: "审查候选知识原子",
     detail: "编辑、批准、拒绝或合并",
     settings: "AI 服务和本地配置",
     logs: "运行事件和错误摘要"
   };
   return subtitles[active];
+}
+
+function filterKnowledgeItems(
+  items: KnowledgeAtomDocument[],
+  filters: { query: string; sourceApp: string; type: string; project: string; tag: string; status: string }
+): KnowledgeAtomDocument[] {
+  const query = filters.query.trim().toLowerCase();
+  const project = filters.project.trim().toLowerCase();
+  const tag = filters.tag.trim().toLowerCase();
+
+  return items.filter((item) => {
+    if (filters.sourceApp && item.atom.source_app !== filters.sourceApp) {
+      return false;
+    }
+    if (filters.type && item.atom.type !== filters.type) {
+      return false;
+    }
+    if (filters.status && item.atom.review_status !== filters.status) {
+      return false;
+    }
+    if (project && item.atom.project.trim().toLowerCase() !== project) {
+      return false;
+    }
+    if (tag && !item.atom.tags.some((itemTag) => itemTag.trim().toLowerCase() === tag)) {
+      return false;
+    }
+    if (!query) {
+      return true;
+    }
+
+    return [
+      item.atom.title,
+      item.atom.content,
+      item.atom.evidence,
+      item.atom.project,
+      item.atom.source_app,
+      item.atom.type,
+      item.atom.tags.join(" "),
+      item.atom.source_raw_paths.join(" ")
+    ].join(" ").toLowerCase().includes(query);
+  });
 }
 
 function compactPath(value: string): string {

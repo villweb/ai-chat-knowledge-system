@@ -72,6 +72,7 @@ function registerIpc() {
     automation: await getAutomationState(),
     connectors: await listConnectors(),
     atoms: await listAtoms(),
+    knowledge: await getKnowledgeView({}),
     logs: await listLogs()
   }));
 
@@ -180,6 +181,55 @@ function registerIpc() {
       throw new Error(result.stderr || "知识状态更新失败。");
     }
     pushEvent("atom_updated", "知识状态已更新。");
+    return JSON.parse(result.stdout);
+  });
+
+  ipcMain.handle("knowledge:view", async (_event, input) => {
+    const result = await runScript("scripts/knowledge-library.ts", ["view", "--vault-root", state.vaultRoot], JSON.stringify(input ?? {}));
+    if (!result.ok) {
+      throw new Error(result.stderr || "读取知识库视图失败。");
+    }
+
+    return JSON.parse(result.stdout);
+  });
+
+  ipcMain.handle("knowledge:export-markdown", async () => {
+    const result = await runScript("scripts/knowledge-library.ts", ["export-markdown", "--vault-root", state.vaultRoot]);
+    if (!result.ok) {
+      throw new Error(result.stderr || "导出 Markdown 失败。");
+    }
+
+    pushEvent("knowledge_exported", "知识库 Markdown 导出完成。");
+    return JSON.parse(result.stdout);
+  });
+
+  ipcMain.handle("knowledge:ensure-obsidian", async () => {
+    const result = await runScript("scripts/knowledge-library.ts", ["ensure-obsidian", "--vault-root", state.vaultRoot]);
+    if (!result.ok) {
+      throw new Error(result.stderr || "生成 Obsidian 索引失败。");
+    }
+
+    pushEvent("obsidian_index_updated", "Obsidian 知识索引已更新。");
+    return JSON.parse(result.stdout);
+  });
+
+  ipcMain.handle("knowledge:backup", async () => {
+    const result = await runScript("scripts/knowledge-library.ts", ["backup", "--vault-root", state.vaultRoot]);
+    if (!result.ok) {
+      throw new Error(result.stderr || "创建知识库备份失败。");
+    }
+
+    pushEvent("knowledge_backup_created", "知识库备份已创建。");
+    return JSON.parse(result.stdout);
+  });
+
+  ipcMain.handle("knowledge:restore-latest", async () => {
+    const result = await runScript("scripts/knowledge-library.ts", ["restore-latest", "--vault-root", state.vaultRoot]);
+    if (!result.ok) {
+      throw new Error(result.stderr || "恢复知识库备份失败。");
+    }
+
+    pushEvent("knowledge_backup_restored", "已恢复最近一次知识库备份。");
     return JSON.parse(result.stdout);
   });
 
@@ -306,6 +356,15 @@ async function listDailyRunHistory() {
   const result = await runScript("scripts/daily-automation.ts", ["list-history", "--vault-root", state.vaultRoot]);
   if (!result.ok) {
     throw new Error(result.stderr || "读取运行历史失败。");
+  }
+
+  return JSON.parse(result.stdout);
+}
+
+async function getKnowledgeView(input) {
+  const result = await runScript("scripts/knowledge-library.ts", ["view", "--vault-root", state.vaultRoot], JSON.stringify(input ?? {}));
+  if (!result.ok) {
+    throw new Error(result.stderr || "读取知识库视图失败。");
   }
 
   return JSON.parse(result.stdout);
