@@ -73,3 +73,6 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+
+# 项目规划和验收记录不推送到远程仓库
+spec/
