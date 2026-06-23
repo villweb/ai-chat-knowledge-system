@@ -7,5 +7,6 @@ export * from "./knowledge-review";
 export * from "./manual-import-normalization-runner";
 export * from "./normalize-manual-import";
 export * from "./privacy-security";
+export * from "./quality-gate";
 export * from "./release-config";
 export * from "./rebuild-local-indexes";

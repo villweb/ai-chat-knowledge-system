@@ -40,6 +40,9 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Quality gate
+        run: npm run quality:gate
+
       - name: Build installer
         run: npm run ${{ matrix.script }}
         env:

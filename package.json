@@ -19,6 +19,7 @@
     "desktop:dist:mac": "tsx scripts/package-desktop.ts --mac",
     "desktop:dist:win": "tsx scripts/package-desktop.ts --win",
     "release:validate": "tsx scripts/release-config.ts",
+    "quality:gate": "tsx scripts/quality-gate.ts",
     "p1:codex-import": "tsx scripts/run-manual-import-normalization.ts --source-app codex",
     "p1:rebuild-indexes": "tsx scripts/rebuild-local-indexes.ts",
     "p2:extract-candidates": "tsx scripts/extract-knowledge-atoms.ts --source-app codex --provider fixture --allow-ai"
