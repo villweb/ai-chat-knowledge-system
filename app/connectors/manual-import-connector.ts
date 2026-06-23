@@ -1,6 +1,6 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import type { SourceApp, VaultRelativePath } from "../schemas";
+import type { SourceApp, SourceType, VaultRelativePath } from "../schemas";
 import { resolveVaultPath, toVaultRelativePath } from "../storage/paths";
 import type {
   RawContentType,
@@ -8,6 +8,7 @@ import type {
   SourceCandidate,
   SourceConnector,
   SourceConnectorListInput,
+  SourceConnectorManifest,
   SourceConnectorReadInput
 } from "./source-connector";
 
@@ -19,13 +20,17 @@ const SUPPORTED_EXTENSIONS = new Map<string, RawContentType>([
 ]);
 
 export class ManualImportConnector implements SourceConnector {
-  readonly supported_source_types = ["manual_export"] as const;
+  readonly source_app: SourceApp;
+  readonly supported_source_types: readonly SourceType[];
 
-  constructor(readonly source_app: SourceApp) {}
+  constructor(readonly manifest: SourceConnectorManifest) {
+    this.source_app = manifest.source_app;
+    this.supported_source_types = manifest.supported_source_types;
+  }
 
   async listCandidates(input: SourceConnectorListInput): Promise<SourceCandidate[]> {
     const root = resolveVaultPath(input.vault_root, `${input.import_root}/${this.source_app}`);
-    const candidates = await listImportFiles(root, input.vault_root, this.source_app);
+    const candidates = await listImportFiles(root, input.vault_root, this.manifest);
 
     return candidates
       .filter((candidate) => !input.since || candidate.detected_at >= input.since);
@@ -45,15 +50,25 @@ export class ManualImportConnector implements SourceConnector {
   }
 }
 
-async function listImportFiles(root: string, vaultRoot: string, sourceApp: SourceApp): Promise<SourceCandidate[]> {
-  const entries = await readdir(root, { withFileTypes: true });
+async function listImportFiles(root: string, vaultRoot: string, manifest: SourceConnectorManifest): Promise<SourceCandidate[]> {
+  let entries: Array<{ name: string; isDirectory(): boolean; isFile(): boolean }>;
+  try {
+    entries = await readdir(root, { withFileTypes: true }) as Array<{ name: string; isDirectory(): boolean; isFile(): boolean }>;
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return [];
+    }
+
+    throw error;
+  }
+
   const candidates: SourceCandidate[] = [];
 
   for (const entry of entries) {
     const absolutePath = path.join(root, entry.name);
 
     if (entry.isDirectory()) {
-      candidates.push(...await listImportFiles(absolutePath, vaultRoot, sourceApp));
+      candidates.push(...await listImportFiles(absolutePath, vaultRoot, manifest));
       continue;
     }
 
@@ -67,15 +82,24 @@ async function listImportFiles(root: string, vaultRoot: string, sourceApp: Sourc
 
     const fileStat = await stat(absolutePath);
     candidates.push({
-      source_app: sourceApp,
-      source_type: "manual_export",
+      source_app: manifest.source_app,
+      source_type: primarySourceType(manifest),
       raw_path: toVaultRelativePath(vaultRoot, absolutePath),
-      raw_source: "manual_import",
+      raw_source: manifest.raw_source,
       detected_at: fileStat.mtime.toISOString()
     });
   }
 
   return candidates;
+}
+
+function primarySourceType(manifest: SourceConnectorManifest): SourceType {
+  const [sourceType] = manifest.supported_source_types;
+  if (!sourceType) {
+    throw new Error(`Connector has no supported source type: ${manifest.source_app}`);
+  }
+
+  return sourceType;
 }
 
 function getContentType(rawPath: VaultRelativePath): RawContentType {
@@ -87,4 +111,8 @@ function getContentType(rawPath: VaultRelativePath): RawContentType {
   }
 
   return contentType;
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }

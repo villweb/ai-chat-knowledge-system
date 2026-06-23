@@ -22,6 +22,7 @@ import "./styles.css";
 type ReviewStatus = "pending" | "approved" | "rejected" | "merged";
 type KnowledgeAtomType = "观点" | "方法" | "决策" | "经验" | "素材" | "问题" | "偏好";
 type NavKey = "guide" | "sources" | "import" | "run" | "pending" | "detail" | "settings" | "logs";
+type SourceConnectorStatus = "available" | "reserved";
 
 interface KnowledgeAtom {
   atom_id: string;
@@ -55,11 +56,28 @@ interface LogEvent {
   created_at: string;
 }
 
+interface SourceConnectorView {
+  source_app: string;
+  display_name: string;
+  status: SourceConnectorStatus;
+  enabled: boolean;
+  supported_source_types: string[];
+  supported_content_types: string[];
+  supported_extensions: string[];
+  import_path: string;
+  permission_scope: string;
+  reads: string[];
+  does_not_read: string[];
+  local_record_recognition: string;
+  failure_help: string;
+}
+
 interface DesktopState {
   vaultRoot: string;
   sourceApp: string;
   aiProvider: string;
   apiKeyConfigured: boolean;
+  connectors: SourceConnectorView[];
   events: LogEvent[];
   atoms: KnowledgeAtomDocument[];
   logs: LogEvent[];
@@ -92,12 +110,14 @@ interface DesktopApi {
   listAtoms(): Promise<KnowledgeAtomDocument[]>;
   updateAtom(input: AtomUpdateInput): Promise<KnowledgeAtomDocument>;
   listLogs(): Promise<LogEvent[]>;
+  setConnectorEnabled(input: { sourceApp: string; enabled: boolean }): Promise<unknown>;
   saveSessionConfig(input: SessionConfigInput): Promise<DesktopState>;
 }
 
 declare global {
   interface Window {
     desktopApi?: DesktopApi;
+    aiKnowledgeRoot?: ReturnType<typeof createRoot>;
   }
 }
 
@@ -155,6 +175,7 @@ function getDesktopApi(): DesktopApi {
     sourceApp: "codex",
     aiProvider: "fixture",
     apiKeyConfigured: false,
+    connectors: buildPreviewConnectors(),
     events: [sampleLog],
     atoms: [sampleAtom],
     logs: [sampleLog]
@@ -199,12 +220,52 @@ function getDesktopApi(): DesktopApi {
     async listLogs() {
       return previewState.logs;
     },
+    async setConnectorEnabled(input) {
+      previewState.connectors = previewState.connectors.map((connector) => (
+        connector.source_app === input.sourceApp ? { ...connector, enabled: input.enabled } : connector
+      ));
+      return { ok: true };
+    },
     async saveSessionConfig(input) {
       previewState.sourceApp = input.sourceApp;
       previewState.aiProvider = input.aiProvider;
       previewState.apiKeyConfigured = Boolean(input.apiKey);
       return previewState;
     }
+  };
+}
+
+function buildPreviewConnectors(): SourceConnectorView[] {
+  return [
+    previewConnector("codex", "Codex", "available", true, "raw/imports/codex", "Codex 手动导出和本地记录副本。"),
+    {
+      ...previewConnector("cursor", "Cursor", "available", true, "raw/imports/cursor", "Cursor 手动导出和本地记录副本。"),
+      does_not_read: ["不读取 Cursor 数据库原件", "不自动遍历工作区代码", "不接入公司项目目录"]
+    },
+    {
+      ...previewConnector("deepseek", "DeepSeek", "available", true, "raw/imports/deepseek", "DeepSeek 网页导出文件。"),
+      does_not_read: ["不自动网页登录", "不读取浏览器 Cookie", "不绕过平台权限采集"]
+    },
+    previewConnector("doubao", "豆包", "reserved", false, "raw/imports/doubao", "预留入口，本阶段不读取。"),
+    previewConnector("workbuddy", "Workbuddy", "reserved", false, "raw/imports/workbuddy", "预留入口，本阶段不读取。")
+  ];
+}
+
+function previewConnector(sourceApp: string, displayName: string, status: SourceConnectorStatus, enabled: boolean, importPath: string, permission: string): SourceConnectorView {
+  return {
+    source_app: sourceApp,
+    display_name: displayName,
+    status,
+    enabled,
+    supported_source_types: status === "reserved" ? ["manual_export"] : ["manual_export"],
+    supported_content_types: ["markdown", "txt", "json"],
+    supported_extensions: [".md", ".markdown", ".txt", ".json"],
+    import_path: importPath,
+    permission_scope: permission,
+    reads: status === "reserved" ? ["暂不读取"] : ["用户放入导入目录的 Markdown/TXT/JSON"],
+    does_not_read: ["不自动网页登录", "不扫描未授权目录", "不上传原始文件"],
+    local_record_recognition: "按扩展名和结构化字段识别。",
+    failure_help: "请检查导入目录、source_app 和 source_type。"
   };
 }
 
@@ -319,7 +380,7 @@ function App() {
         {notice && <div className="notice">{notice}</div>}
 
         {active === "guide" && <GuidePanel state={state} counts={counts} />}
-        {active === "sources" && <SourcesPanel sourceApp={state.sourceApp} />}
+        {active === "sources" && <SourcesPanel connectors={state.connectors} sourceApp={state.sourceApp} busy={busy} onToggle={(sourceApp, enabled) => withBusy(() => desktopApi.setConnectorEnabled({ sourceApp, enabled }), "连接器状态已更新")} />}
         {active === "import" && <ImportPanel busy={busy} onChoose={() => withBusy(() => desktopApi.chooseImportFiles(state.sourceApp), "文件已导入")} onRun={() => withBusy(() => desktopApi.runImport(), "导入和标准化完成")} />}
         {active === "run" && <RunPanel busy={busy} events={state.events} onRun={() => withBusy(() => desktopApi.runDaily(), "每日沉淀完成")} />}
         {active === "pending" && <PendingPanel atoms={filteredAtoms} counts={counts} query={query} selectedId={selected?.atom.atom_id ?? ""} onQuery={setQuery} onSelect={(atomId) => { setSelectedId(atomId); setActive("detail"); }} />}
@@ -356,16 +417,34 @@ function GuidePanel({ state, counts }: { state: DesktopState; counts: Record<Rev
   );
 }
 
-function SourcesPanel({ sourceApp }: { sourceApp: string }) {
+function SourcesPanel({ connectors, sourceApp, busy, onToggle }: { connectors: SourceConnectorView[]; sourceApp: string; busy: boolean; onToggle: (sourceApp: string, enabled: boolean) => void }) {
   return (
     <section className="panel">
       <h2>来源管理</h2>
       <div className="sourceTable">
-        {["codex", "cursor", "deepseek", "doubao", "workbuddy"].map((source) => (
-          <div className="sourceRow" key={source}>
-            <span>{source}</span>
-            <strong>{source === sourceApp ? "已启用" : "预留"}</strong>
-            <small>{source === "codex" ? "手动导入可用" : "等待 P4 连接器"}</small>
+        {connectors.map((connector) => (
+          <div className="sourceRow" key={connector.source_app}>
+            <div>
+              <strong>{connector.display_name}</strong>
+              <span>{connector.import_path}</span>
+            </div>
+            <label className="sourceToggle">
+              <input
+                type="checkbox"
+                checked={connector.enabled}
+                disabled={busy || connector.status !== "available"}
+                onChange={(event) => onToggle(connector.source_app, event.target.checked)}
+              />
+              <span>{connector.status === "available" ? (connector.enabled ? "已启用" : "已停用") : "预留"}</span>
+            </label>
+            <div className="sourceMeta">
+              <span>{connector.source_app === sourceApp ? "默认来源" : connector.supported_extensions.join(" ")}</span>
+              <small>{connector.permission_scope}</small>
+              <small>读取：{connector.reads.join("；")}</small>
+              <small>不读取：{connector.does_not_read.join("；")}</small>
+              <small>识别：{connector.local_record_recognition}</small>
+              <small>失败提示：{connector.failure_help}</small>
+            </div>
           </div>
         ))}
       </div>
@@ -378,7 +457,7 @@ function ImportPanel({ busy, onChoose, onRun }: { busy: boolean; onChoose: () =>
     <div className="grid two">
       <section className="panel">
         <h2>手动导入</h2>
-        <p className="muted">支持 Markdown、TXT、JSON，本阶段写入 Codex 手动导入目录。</p>
+        <p className="muted">支持 Markdown、TXT、JSON，写入当前默认来源的导入目录。</p>
         <button className="primary" onClick={onChoose} disabled={busy}><FolderOpen size={17} /><span>选择文件</span></button>
       </section>
       <section className="panel">
@@ -486,7 +565,7 @@ function SettingsPanel({ state, busy, onSave }: { state: DesktopState; busy: boo
     <section className="panel settingsPanel">
       <h2>设置</h2>
       <div className="formGrid">
-        <label>默认来源<select value={sourceApp} onChange={(event) => setSourceApp(event.target.value)}><option value="codex">codex</option><option value="cursor">cursor</option><option value="deepseek">deepseek</option><option value="doubao">doubao</option><option value="workbuddy">workbuddy</option></select></label>
+        <label>默认来源<select value={sourceApp} onChange={(event) => setSourceApp(event.target.value)}>{state.connectors.filter((connector) => connector.status === "available" && connector.enabled).map((connector) => <option key={connector.source_app} value={connector.source_app}>{connector.display_name}</option>)}</select></label>
         <label>AI 服务<select value={aiProvider} onChange={(event) => setAiProvider(event.target.value)}><option value="fixture">fixture</option><option value="openai-compatible">openai-compatible</option></select></label>
         <label>Base URL<input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://api.example.com/v1" /></label>
         <label>模型<input value={model} onChange={(event) => setModel(event.target.value)} placeholder="model-name" /></label>
@@ -548,4 +627,14 @@ function compactPath(value: string): string {
   return parts.length > 3 ? `.../${parts.slice(-3).join("/")}` : value;
 }
 
-createRoot(document.getElementById("root") as HTMLElement).render(<App />);
+const rootElement = document.getElementById("root") as HTMLElement;
+const root = window.aiKnowledgeRoot ?? createRoot(rootElement);
+window.aiKnowledgeRoot = root;
+root.render(<App />);
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    root.unmount();
+    delete window.aiKnowledgeRoot;
+  });
+}

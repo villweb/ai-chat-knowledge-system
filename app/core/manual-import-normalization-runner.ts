@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { ManualImportConnector } from "../connectors";
+import { createSourceConnector } from "../connectors";
 import { LocalRunLogger } from "../services";
 import {
   buildKnowledgeAtomMarkdownDocument,
@@ -47,7 +47,7 @@ export async function runManualImportNormalization(
   const runId = input.run_id ?? `run_${new Date().toISOString().replace(/[:.]/g, "-")}_${randomUUID()}`;
   const startedAt = new Date().toISOString();
   const logger = new LocalRunLogger({ vault_root: input.vault_root, logs_dir: paths.logs_dir });
-  const connector = new ManualImportConnector(input.source_app);
+  const connector = createSourceConnector(input.source_app);
   const storage = new LocalStorageProvider({
     vault_root: input.vault_root,
     sqlite_path: paths.sqlite_path

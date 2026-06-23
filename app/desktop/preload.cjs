@@ -9,5 +9,6 @@ contextBridge.exposeInMainWorld("desktopApi", {
   listAtoms: () => ipcRenderer.invoke("atoms:list"),
   updateAtom: (input) => ipcRenderer.invoke("atoms:update", input),
   listLogs: () => ipcRenderer.invoke("logs:list"),
+  setConnectorEnabled: (input) => ipcRenderer.invoke("connectors:set-enabled", input),
   saveSessionConfig: (input) => ipcRenderer.invoke("settings:save-session-config", input)
 });

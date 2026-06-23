@@ -4,11 +4,19 @@ const { copyFile, mkdir, readdir, readFile } = require("node:fs/promises");
 const path = require("node:path");
 
 const repoRoot = path.resolve(__dirname, "../..");
+const sourceApps = ["codex", "cursor", "deepseek", "doubao", "workbuddy"];
 const state = {
   vaultRoot: repoRoot,
   sourceApp: "codex",
   aiProvider: "fixture",
   apiKeyConfigured: false,
+  enabledConnectors: {
+    codex: true,
+    cursor: true,
+    deepseek: true,
+    doubao: false,
+    workbuddy: false
+  },
   events: []
 };
 
@@ -55,6 +63,7 @@ app.on("activate", () => {
 function registerIpc() {
   ipcMain.handle("app:get-state", async () => ({
     ...state,
+    connectors: await listConnectors(),
     atoms: await listAtoms(),
     logs: await listLogs()
   }));
@@ -70,6 +79,9 @@ function registerIpc() {
 
   ipcMain.handle("settings:save-session-config", async (_event, input) => {
     if (input.sourceApp) {
+      if (!isSourceEnabled(input.sourceApp)) {
+        throw new Error(`连接器未启用，不能设为默认来源：${input.sourceApp}`);
+      }
       state.sourceApp = input.sourceApp;
     }
     state.aiProvider = input.aiProvider === "openai-compatible" ? "openai-compatible" : "fixture";
@@ -87,7 +99,32 @@ function registerIpc() {
     return { ok: true, aiProvider: state.aiProvider, apiKeyConfigured: state.apiKeyConfigured };
   });
 
+  ipcMain.handle("connectors:set-enabled", async (_event, input) => {
+    if (!sourceApps.includes(input.sourceApp)) {
+      throw new Error(`未知连接器：${input.sourceApp}`);
+    }
+
+    const connectors = await listConnectors();
+    const connector = connectors.find((item) => item.source_app === input.sourceApp);
+    if (!connector) {
+      throw new Error(`连接器不存在：${input.sourceApp}`);
+    }
+    if (connector.status !== "available") {
+      throw new Error(`${connector.display_name} 仍是预留连接器，当前阶段不能启用。`);
+    }
+
+    state.enabledConnectors[input.sourceApp] = Boolean(input.enabled);
+    if (!state.enabledConnectors[state.sourceApp]) {
+      const nextSource = connectors.find((item) => item.status === "available" && state.enabledConnectors[item.source_app]);
+      state.sourceApp = nextSource?.source_app ?? "codex";
+    }
+    pushEvent("connector_updated", `${connector.display_name} 已${state.enabledConnectors[input.sourceApp] ? "启用" : "停用"}。`);
+    return { connectors: await listConnectors(), sourceApp: state.sourceApp };
+  });
+
   ipcMain.handle("import:choose-files", async (_event, sourceApp) => {
+    const targetSource = sourceApp || state.sourceApp;
+    ensureSourceEnabled(targetSource);
     const result = await dialog.showOpenDialog({
       properties: ["openFile", "multiSelections"],
       filters: [{ name: "AI chat exports", extensions: ["md", "markdown", "txt", "json"] }]
@@ -96,7 +133,7 @@ function registerIpc() {
       return { copied_file_count: 0 };
     }
 
-    const targetDir = path.join(state.vaultRoot, "raw/imports", sourceApp || state.sourceApp);
+    const targetDir = path.join(state.vaultRoot, "raw/imports", targetSource);
     await mkdir(targetDir, { recursive: true });
     for (const file of result.filePaths) {
       await copyFile(file, path.join(targetDir, path.basename(file)));
@@ -106,6 +143,7 @@ function registerIpc() {
   });
 
   ipcMain.handle("workflow:run-import", async () => {
+    ensureSourceEnabled(state.sourceApp);
     const result = await runScript("scripts/run-manual-import-normalization.ts", [
       "--source-app",
       state.sourceApp,
@@ -121,6 +159,7 @@ function registerIpc() {
   });
 
   ipcMain.handle("workflow:run-daily", async () => {
+    ensureSourceEnabled(state.sourceApp);
     const importResult = await runScript("scripts/run-manual-import-normalization.ts", [
       "--source-app",
       state.sourceApp,
@@ -169,7 +208,7 @@ function runCommand(command, args, stdin) {
   return new Promise((resolve) => {
     const child = spawn(command, args, {
       cwd: repoRoot,
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+      env: { ...process.env },
       shell: false
     });
     let stdout = "";
@@ -191,7 +230,11 @@ function runCommand(command, args, stdin) {
 }
 
 function runScript(scriptPath, args, stdin) {
-  return runCommand(process.execPath, ["--import", "tsx", path.join(repoRoot, scriptPath), ...args], stdin);
+  return runCommand(getNodeBinary(), ["--import", "tsx", path.join(repoRoot, scriptPath), ...args], stdin);
+}
+
+function getNodeBinary() {
+  return process.env.AI_KB_NODE_BINARY || process.env.npm_node_execpath || "node";
 }
 
 async function listAtoms() {
@@ -200,6 +243,26 @@ async function listAtoms() {
     throw new Error(result.stderr || "读取知识列表失败。");
   }
   return JSON.parse(result.stdout);
+}
+
+async function listConnectors() {
+  const enabled = sourceApps.filter((sourceApp) => state.enabledConnectors[sourceApp]).join(",");
+  const result = await runScript("scripts/list-source-connectors.ts", ["--enabled", enabled]);
+  if (!result.ok) {
+    throw new Error(result.stderr || "读取连接器列表失败。");
+  }
+
+  return JSON.parse(result.stdout);
+}
+
+function isSourceEnabled(sourceApp) {
+  return Boolean(state.enabledConnectors[sourceApp]);
+}
+
+function ensureSourceEnabled(sourceApp) {
+  if (!isSourceEnabled(sourceApp)) {
+    throw new Error(`连接器未启用，无法读取来源：${sourceApp}`);
+  }
 }
 
 async function listLogs() {

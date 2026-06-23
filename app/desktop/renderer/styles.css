@@ -295,10 +295,10 @@ nav {
 
 .sourceRow {
   display: grid;
-  grid-template-columns: minmax(110px, 0.8fr) minmax(80px, 0.6fr) minmax(160px, 1.2fr);
+  grid-template-columns: minmax(130px, 0.7fr) minmax(112px, 0.35fr) minmax(280px, 1.4fr);
   gap: 12px;
-  align-items: center;
-  min-height: 52px;
+  align-items: start;
+  min-height: 86px;
   padding: 12px 14px;
   border-bottom: 1px solid #dde5e1;
 }
@@ -307,12 +307,49 @@ nav {
   border-bottom: 0;
 }
 
+.sourceRow strong,
+.sourceRow span,
+.sourceRow small {
+  display: block;
+}
+
 .sourceRow strong {
   color: #2b6c42;
 }
 
+.sourceRow span {
+  margin-top: 4px;
+  color: #596862;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
 .sourceRow small {
+  margin-top: 4px;
   color: #64736e;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.sourceToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  color: #25342f;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.sourceToggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: #23724f;
+}
+
+.sourceMeta {
+  display: grid;
+  gap: 2px;
 }
 
 .primary {
