@@ -191,9 +191,11 @@ function registerIpc() {
 
     try {
       pipelinePhase = "processing";
-      const pipelineResult = await runDailyWorkflow();
+      const pipelineResult = await runDailyWorkflow(undefined, undefined, { uiManualImport: true });
       const atoms = await listAtoms();
       const pendingCount = atoms.filter((item) => item.atom.review_status === "pending").length;
+      const importSummary = parseScriptStdout(pipelineResult.importResult);
+      const extractSummary = parseScriptStdout(pipelineResult.extractResult);
       pipelinePhase = pendingCount > 0 ? "waiting_review" : "done";
       pushEvent(
         "import_pipeline_completed",
@@ -207,6 +209,14 @@ function registerIpc() {
         auto_processed: true,
         pending_atom_count: pendingCount,
         total_atom_count: atoms.length,
+        normalized_record_count: importSummary?.normalized_record_count ?? 0,
+        generated_atom_count: Math.max(
+          importSummary?.generated_atom_count ?? 0,
+          extractSummary?.generated_atom_count ?? 0
+        ),
+        failed_file_count: importSummary?.failed_file_count ?? 0,
+        blocked_record_count: extractSummary?.blocked_record_count ?? 0,
+        used_personal_default: true,
         pipeline: getPipelineState(),
         ...pipelineResult
       };
@@ -620,7 +630,7 @@ async function runAutomationDate(runDate, reason) {
   }
 }
 
-async function runDailyWorkflow(runDate, runIdPrefix) {
+async function runDailyWorkflow(runDate, runIdPrefix, options = {}) {
   ensureSourceEnabled(state.sourceApp);
   const importArgs = [
     "--source-app",
@@ -628,6 +638,9 @@ async function runDailyWorkflow(runDate, runIdPrefix) {
     "--vault-root",
     state.vaultRoot
   ];
+  if (options.uiManualImport) {
+    importArgs.push("--default-sensitivity-missing", "personal");
+  }
   const extractArgs = [
     "--source-app",
     state.sourceApp,
@@ -804,4 +817,16 @@ function toErrorMessage(error) {
   }
 
   return String(error);
+}
+
+function parseScriptStdout(result) {
+  if (!result?.stdout?.trim()) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(result.stdout);
+  } catch {
+    return null;
+  }
 }

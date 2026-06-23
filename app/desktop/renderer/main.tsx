@@ -206,6 +206,11 @@ interface ImportResult {
   auto_processed?: boolean;
   pending_atom_count?: number;
   total_atom_count?: number;
+  normalized_record_count?: number;
+  generated_atom_count?: number;
+  failed_file_count?: number;
+  blocked_record_count?: number;
+  used_personal_default?: boolean;
 }
 
 interface ReleaseState {
@@ -840,24 +845,6 @@ function App() {
     return state?.atoms.find((item) => item.atom.atom_id === selectedId) ?? state?.atoms[0] ?? null;
   }, [selectedId, state]);
 
-  const pendingAtoms = useMemo(() => {
-    return (state?.atoms ?? []).filter((item) => item.atom.review_status === "pending");
-  }, [state]);
-
-  const filteredPendingAtoms = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    return pendingAtoms.filter((item) => {
-      if (!needle) {
-        return true;
-      }
-
-      return [item.atom.title, item.atom.content, item.atom.evidence, item.atom.project, item.atom.tags.join(" ")]
-        .join(" ")
-        .toLowerCase()
-        .includes(needle);
-    });
-  }, [pendingAtoms, query]);
-
   const counts = useMemo(() => {
     const items = state?.atoms ?? [];
     return {
@@ -921,7 +908,31 @@ function App() {
     const names = result.copied_file_names?.join("、") ?? `${result.copied_file_count} 个文件`;
     const importPath = result.import_path ?? "raw/imports";
     const pending = result.pending_atom_count ?? 0;
-    return `已导入 ${names} 到 ${importPath}，并完成自动提炼。${pending} 条知识在「待确认」等待审查。`;
+    const normalized = result.normalized_record_count ?? 0;
+    const generated = result.generated_atom_count ?? 0;
+    const failed = result.failed_file_count ?? 0;
+    const blocked = result.blocked_record_count ?? 0;
+
+    let message = `已导入 ${names} 到 ${importPath}，并完成自动提炼。`;
+    if (pending > 0) {
+      message += `${pending} 条知识在「待确认」等待审查。`;
+      return message;
+    }
+
+    message += "当前 0 条待确认。";
+    if (failed > 0) {
+      message += ` ${failed} 个文件处理失败，请查看「日志」。`;
+    }
+    if (normalized > 0 && generated === 0) {
+      if (result.used_personal_default) {
+        message += ` 已标准化 ${normalized} 条记录，但未生成候选知识：内容可能被敏感规则阻断（阻断 ${blocked} 条），或格式不符合要求。`;
+      } else {
+        message += ` 已标准化 ${normalized} 条记录，但未生成候选知识：文件未标记 sensitivity: personal，或内容被敏感规则阻断。`;
+      }
+    } else if (normalized === 0 && failed === 0) {
+      message += " 未能从文件中解析出有效对话记录，请确认格式包含「用户消息」和「AI 回复」章节。";
+    }
+    return message;
   }
 
   async function withBusy(action: () => Promise<unknown>, successMessage: string, kind: "info" | "error" = "info") {
@@ -1107,7 +1118,7 @@ function App() {
         )}
         {active === "pending" && (
           <PendingPanel
-            atoms={filteredPendingAtoms}
+            atoms={state.atoms}
             counts={counts}
             query={query}
             selectedId={selected?.atom.atom_id ?? ""}
@@ -1683,30 +1694,80 @@ function CommercialPanel({
   );
 }
 
-function PendingPanel({ atoms, counts, query, selectedId, onQuery, onSelect }: { atoms: KnowledgeAtomDocument[]; counts: Record<ReviewStatus, number>; query: string; selectedId: string; onQuery: (value: string) => void; onSelect: (atomId: string) => void }) {
+function PendingPanel({
+  atoms,
+  counts,
+  query,
+  selectedId,
+  onQuery,
+  onSelect
+}: {
+  atoms: KnowledgeAtomDocument[];
+  counts: Record<ReviewStatus, number>;
+  query: string;
+  selectedId: string;
+  onQuery: (value: string) => void;
+  onSelect: (atomId: string) => void;
+}) {
+  const [statusFilter, setStatusFilter] = useState<ReviewStatus>("pending");
+
+  const statusTabs: Array<{ key: ReviewStatus; label: string; count: number }> = [
+    { key: "pending", label: "待确认", count: counts.pending },
+    { key: "approved", label: "已批准", count: counts.approved },
+    { key: "rejected", label: "已拒绝", count: counts.rejected },
+    { key: "merged", label: "已合并", count: counts.merged }
+  ];
+
+  const filteredAtoms = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return atoms.filter((item) => {
+      if (item.atom.review_status !== statusFilter) {
+        return false;
+      }
+      if (!needle) {
+        return true;
+      }
+
+      return [item.atom.title, item.atom.content, item.atom.evidence, item.atom.project, item.atom.tags.join(" ")]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle);
+    });
+  }, [atoms, query, statusFilter]);
+
   return (
     <section className="panel fill">
       <div className="listHeader">
         <div className="statusPills">
-          <span>待确认 {counts.pending}</span>
-          <span>已批准 {counts.approved}</span>
-          <span>已拒绝 {counts.rejected}</span>
-          <span>已合并 {counts.merged}</span>
+          {statusTabs.map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              className={statusFilter === tab.key ? `statusPill active status ${tab.key}` : `statusPill status ${tab.key}`}
+              onClick={() => setStatusFilter(tab.key)}
+            >
+              {tab.label} {tab.count}
+            </button>
+          ))}
         </div>
         <label className="search"><Search size={16} /><input value={query} onChange={(event) => onQuery(event.target.value)} placeholder="搜索标题、正文、证据" /></label>
       </div>
       <div className="atomList">
-        {atoms.map((item) => (
+        {filteredAtoms.map((item) => (
           <button key={item.atom.atom_id} className={selectedId === item.atom.atom_id ? "atomRow active" : "atomRow"} onClick={() => onSelect(item.atom.atom_id)}>
             <strong>{item.atom.title}</strong>
             <span>{item.atom.type} · {item.atom.review_status} · {item.atom.source_app}</span>
             <small>{item.atom.evidence}</small>
           </button>
         ))}
-        {atoms.length === 0 && (
+        {filteredAtoms.length === 0 && (
           <div className="emptyState">
-            <p>导入聊天文件后，候选知识会出现在这里等待你批准或拒绝。</p>
-            <p className="muted">点击左侧「导入」，选择文件后会自动提炼。</p>
+            <p>
+              {statusFilter === "pending"
+                ? "导入聊天文件后，候选知识会出现在这里等待你批准或拒绝。"
+                : `当前没有「${statusTabs.find((tab) => tab.key === statusFilter)?.label ?? statusFilter}」状态的知识。`}
+            </p>
+            {statusFilter === "pending" && <p className="muted">点击左侧「导入」，选择文件后会自动提炼。</p>}
           </div>
         )}
       </div>
