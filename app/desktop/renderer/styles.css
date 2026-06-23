@@ -310,6 +310,76 @@ nav {
   background: linear-gradient(180deg, #f7fbf8 0%, #ffffff 100%);
 }
 
+.fixtureModeBanner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border: 1px solid #e8d7a6;
+  border-radius: 8px;
+  background: #fffaf0;
+  color: #5a4a1f;
+}
+
+.fixtureModeBanner strong {
+  display: block;
+  color: #3d3214;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.fixtureModeBanner span {
+  display: block;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.fixtureModeBanner button {
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.importAiNotice {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #dce3e0;
+  background: #ffffff;
+}
+
+.importAiNotice.warning {
+  border-color: #e8d7a6;
+  background: #fffaf0;
+}
+
+.importAiNotice.ok {
+  border-color: #b9dcc4;
+  background: #f4fbf6;
+}
+
+.importAiNotice strong {
+  color: #17221f;
+  font-size: 13px;
+}
+
+.importAiNotice span {
+  color: #65766f;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.importAiNotice button {
+  justify-self: start;
+  margin-top: 4px;
+}
+
+.checkList .checkWarn {
+  color: #8a6d1f;
+}
+
 .onboardingHead {
   display: flex;
   align-items: center;

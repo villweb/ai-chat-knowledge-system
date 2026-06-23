@@ -274,6 +274,8 @@ interface DesktopState {
   vaultRoot: string;
   sourceApp: string;
   aiProvider: string;
+  aiBaseUrl?: string;
+  aiModel?: string;
   apiKeyConfigured: boolean;
   automation: DailyAutomationState;
   connectors: SourceConnectorView[];
@@ -356,7 +358,7 @@ const ONBOARDING_DISMISS_KEY = "ai-kb-onboarding-dismissed";
 
 const onboardingSteps = [
   { step: 1, label: "导入", hint: "选择 AI 聊天导出文件" },
-  { step: 2, label: "自动提炼", hint: "系统自动标准化并生成候选知识" },
+  { step: 2, label: "自动提炼", hint: "标准化并生成候选知识（测试模式不调用外部 API）" },
   { step: 3, label: "待确认审查", hint: "在「待确认」中批准或拒绝" }
 ];
 
@@ -375,6 +377,14 @@ const navItems: Array<{ key: NavKey; label: string; icon: React.ComponentType<{ 
 ];
 
 const typeOptions: KnowledgeAtomType[] = ["观点", "方法", "决策", "经验", "素材", "问题", "偏好"];
+
+function isFixtureProvider(provider: string): boolean {
+  return provider !== "openai-compatible";
+}
+
+function aiProviderLabel(provider: string): string {
+  return provider === "openai-compatible" ? "真实 AI API" : "本地测试模式（fixture）";
+}
 
 function getDesktopApi(): DesktopApi {
   if (window.desktopApi) {
@@ -1108,6 +1118,10 @@ function App() {
           />
         )}
 
+        {isFixtureProvider(state.aiProvider) && (
+          <FixtureModeBanner onGoSettings={() => setActive("settings")} />
+        )}
+
         {notice && <div className={noticeKind === "error" ? "notice error" : "notice"}>{notice}</div>}
 
         {active === "guide" && <GuidePanel state={state} counts={counts} onGoImport={() => setActive("import")} onGoPending={() => setActive("pending")} />}
@@ -1116,8 +1130,10 @@ function App() {
           <ImportPanel
             busy={busy}
             sourceApp={state.sourceApp}
+            aiProvider={state.aiProvider}
             importPath={`raw/imports/${state.sourceApp}`}
             onImport={() => void handleImport()}
+            onGoSettings={() => setActive("settings")}
             onRunNormalize={() => withBusy(() => desktopApi.runImport(), "标准化完成，请到「待确认」查看结果。")}
           />
         )}
@@ -1194,6 +1210,19 @@ function App() {
         {active === "logs" && <LogsPanel logs={[...state.events, ...state.logs]} />}
       </section>
     </main>
+  );
+}
+
+function FixtureModeBanner({ onGoSettings }: { onGoSettings: () => void }) {
+  return (
+    <div className="fixtureModeBanner">
+      <Shield size={18} />
+      <div>
+        <strong>当前为本地测试模式，不调用外部 AI API，不消耗 DeepSeek 额度</strong>
+        <span>提炼结果由本地模板生成。如需真实 AI 提炼，请前往「设置」切换为「真实 AI API」并配置 DeepSeek。</span>
+      </div>
+      <button className="secondary" onClick={onGoSettings}><Settings size={16} />去设置</button>
+    </div>
   );
 }
 
@@ -1276,9 +1305,14 @@ function GuidePanel({
         <ul className="checkList">
           <li><Check size={16} />知识库位置：{compactPath(state.vaultRoot)}</li>
           <li><Check size={16} />来源：{state.sourceApp}</li>
-          <li><Shield size={16} />AI 服务：{state.aiProvider}</li>
+          <li className={isFixtureProvider(state.aiProvider) ? "checkWarn" : ""}>
+            <Shield size={16} />AI 服务：{aiProviderLabel(state.aiProvider)}
+          </li>
           <li><Shield size={16} />API Key：{state.apiKeyConfigured ? "已配置" : "未配置"}</li>
         </ul>
+        {isFixtureProvider(state.aiProvider) && (
+          <p className="muted hint">测试模式下 P1/P2 均不调用外部 API。P1 生成占位卡片，P2 用本地模板拼接内容。</p>
+        )}
       </section>
     </div>
   );
@@ -1322,14 +1356,18 @@ function SourcesPanel({ connectors, sourceApp, busy, onToggle }: { connectors: S
 function ImportPanel({
   busy,
   sourceApp,
+  aiProvider,
   importPath,
   onImport,
+  onGoSettings,
   onRunNormalize
 }: {
   busy: boolean;
   sourceApp: string;
+  aiProvider: string;
   importPath: string;
   onImport: () => void;
+  onGoSettings: () => void;
   onRunNormalize: () => void;
 }) {
   return (
@@ -1337,6 +1375,18 @@ function ImportPanel({
       <section className="panel">
         <h2>导入聊天文件</h2>
         <p className="muted">选择 AI 聊天导出文件（Markdown、TXT、JSON）。导入后会自动标准化并提炼候选知识。</p>
+        {isFixtureProvider(aiProvider) ? (
+          <div className="importAiNotice warning">
+            <strong>当前为测试模式</strong>
+            <span>不会调用 DeepSeek 等外部 API。待确认内容来自本地占位/模板，非真实 AI 提炼。</span>
+            <button className="secondary" onClick={onGoSettings} disabled={busy}><Settings size={16} />配置真实 AI</button>
+          </div>
+        ) : (
+          <div className="importAiNotice ok">
+            <strong>已启用真实 AI API</strong>
+            <span>P2 提炼将调用已配置的 OpenAI 兼容接口（如 DeepSeek）。</span>
+          </div>
+        )}
         <div className="importMeta">
           <span>当前来源：{sourceApp}</span>
           <span>保存位置：{importPath}</span>
@@ -1954,20 +2004,26 @@ function SettingsPanel({
 }) {
   const [sourceApp, setSourceApp] = useState(state.sourceApp);
   const [aiProvider, setAiProvider] = useState(state.aiProvider);
-  const [baseUrl, setBaseUrl] = useState("");
-  const [model, setModel] = useState("");
+  const [baseUrl, setBaseUrl] = useState(state.aiBaseUrl ?? "");
+  const [model, setModel] = useState(state.aiModel ?? "");
   const [apiKey, setApiKey] = useState("");
 
   return (
     <div className="grid two">
       <section className="panel settingsPanel">
         <h2>设置</h2>
+        {isFixtureProvider(aiProvider) && (
+          <div className="importAiNotice warning">
+            <strong>当前为本地测试模式（fixture）</strong>
+            <span>不消耗 API 额度，提炼结果为本地模板。切换下方「AI 服务」并填写 DeepSeek 配置后可启用真实调用。</span>
+          </div>
+        )}
         <div className="formGrid">
           <label>默认来源<select value={sourceApp} onChange={(event) => setSourceApp(event.target.value)}>{state.connectors.filter((connector) => connector.status === "available" && connector.enabled).map((connector) => <option key={connector.source_app} value={connector.source_app}>{connector.display_name}</option>)}</select></label>
-          <label>AI 服务<select value={aiProvider} onChange={(event) => setAiProvider(event.target.value)}><option value="fixture">fixture</option><option value="openai-compatible">openai-compatible</option></select></label>
-          <label>Base URL<input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://api.example.com/v1" /></label>
-          <label>模型<input value={model} onChange={(event) => setModel(event.target.value)} placeholder="model-name" /></label>
-          <label>API Key<input value={apiKey} onChange={(event) => setApiKey(event.target.value)} type="password" placeholder="本地加密保存" /></label>
+          <label>AI 服务<select value={aiProvider} onChange={(event) => setAiProvider(event.target.value)}><option value="fixture">本地测试模式（不调用 API）</option><option value="openai-compatible">真实 AI API（OpenAI 兼容，如 DeepSeek）</option></select></label>
+          <label>Base URL<input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://api.deepseek.com/v1" /></label>
+          <label>模型<input value={model} onChange={(event) => setModel(event.target.value)} placeholder="deepseek-chat" /></label>
+          <label>API Key<input value={apiKey} onChange={(event) => setApiKey(event.target.value)} type="password" placeholder={state.apiKeyConfigured ? "已保存，留空则不修改" : "本地加密保存"} /></label>
         </div>
         <button className="primary" onClick={() => onSave({ sourceApp, aiProvider, baseUrl, model, apiKey })} disabled={busy}><Shield size={17} /><span>保存会话配置</span></button>
       </section>

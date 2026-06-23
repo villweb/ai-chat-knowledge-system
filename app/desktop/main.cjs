@@ -119,7 +119,9 @@ function registerIpc() {
       state.sourceApp = input.sourceApp;
     }
     state.aiProvider = input.aiProvider === "openai-compatible" ? "openai-compatible" : "fixture";
-    state.apiKeyConfigured = Boolean(input.apiKey);
+    if (input.apiKey) {
+      state.apiKeyConfigured = true;
+    }
     if (input.apiKey) {
       process.env.AI_KB_OPENAI_API_KEY = input.apiKey;
       const credentialResult = await runScript("scripts/privacy-security.ts", ["save-credential", "--vault-root", state.vaultRoot], JSON.stringify({
@@ -804,6 +806,65 @@ async function listLogs() {
   } catch {
     return [];
   }
+}
+
+async function ensureSessionConfigLoaded() {
+  if (sessionConfigLoaded) {
+    return;
+  }
+
+  sessionConfigLoaded = true;
+  const configPath = path.join(state.vaultRoot, SESSION_CONFIG_PATH);
+  let savedConfig = null;
+  try {
+    savedConfig = JSON.parse(await readFile(configPath, "utf8"));
+  } catch {
+    savedConfig = null;
+  }
+
+  const privacy = await getPrivacyState();
+  const credentialSaved = privacy.secure_credentials.openai_compatible_saved;
+
+  if (savedConfig?.source_app && isSourceEnabled(savedConfig.source_app)) {
+    state.sourceApp = savedConfig.source_app;
+  }
+
+  if (savedConfig?.ai_provider === "openai-compatible" || savedConfig?.ai_provider === "fixture") {
+    state.aiProvider = savedConfig.ai_provider;
+  } else if (credentialSaved) {
+    // 已保存 API Key 时默认启用真实 AI，避免重启后仍停留在测试模式
+    state.aiProvider = "openai-compatible";
+  }
+
+  if (savedConfig?.base_url) {
+    state.aiBaseUrl = savedConfig.base_url;
+    process.env.AI_KB_OPENAI_BASE_URL = savedConfig.base_url;
+  }
+  if (savedConfig?.model) {
+    state.aiModel = savedConfig.model;
+    process.env.AI_KB_OPENAI_MODEL = savedConfig.model;
+  }
+
+  if (state.aiProvider === "openai-compatible" && credentialSaved) {
+    try {
+      await loadSecureCredentialIntoEnv();
+    } catch {
+      // 凭据读取失败时保留当前 provider，由后续运行报错提示
+    }
+  }
+}
+
+async function saveSessionConfig() {
+  const configPath = path.join(state.vaultRoot, SESSION_CONFIG_PATH);
+  await mkdir(path.dirname(configPath), { recursive: true });
+  await writeFile(configPath, `${JSON.stringify({
+    schema_version: "desktop_session.v1",
+    source_app: state.sourceApp,
+    ai_provider: state.aiProvider,
+    base_url: state.aiBaseUrl,
+    model: state.aiModel,
+    updated_at: new Date().toISOString()
+  }, null, 2)}\n`, "utf8");
 }
 
 function getPipelineState() {
