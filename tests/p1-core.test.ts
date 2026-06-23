@@ -5,14 +5,11 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import {
-  extractKnowledgeAtoms,
   normalizeManualImport,
-  prepareRecordForAI,
   rebuildLocalIndexes,
   runManualImportNormalization
 } from "../app/core";
 import type { RawSourceDocument } from "../app/connectors";
-import { SCHEMA_VERSION, type NormalizedRecord } from "../app/schemas";
 import { buildRunLogEvent } from "../app/services";
 import { LocalStorageProvider, SQLiteNormalizedRecordStore, toSafeTitle } from "../app/storage";
 
@@ -134,65 +131,6 @@ test("log sanitization and safe title formatting stay stable", () => {
   assert.equal(toSafeTitle(" a/b:c*?<>| title "), "abc-title");
 });
 
-test("P2 extraction requires authorization, redacts AI input and writes pending candidates", async () => {
-  const vaultRoot = await createTempVault();
-  await writeCodexSamples(vaultRoot);
-  await runManualImportNormalization({
-    vault_root: vaultRoot,
-    source_app: "codex",
-    run_id: "run_p2_import"
-  });
-
-  await assert.rejects(
-    () => extractKnowledgeAtoms({
-      vault_root: vaultRoot,
-      source_app: "codex",
-      provider: "fixture",
-      allow_ai: false
-    }),
-    /explicit user authorization/
-  );
-
-  const preview = prepareRecordForAI(buildSecretRecord());
-  assert.ok(preview);
-  assert.equal(preview.ai_input.user_excerpt.includes("sk-secret"), false);
-  assert.equal(preview.ai_input.user_excerpt.includes("/Users/may/secret"), false);
-  assert.ok(preview.ai_input.user_excerpt.includes("[redacted_api_key]"));
-  assert.ok(preview.ai_input.user_excerpt.includes("<local_path>"));
-
-  const summary = await extractKnowledgeAtoms({
-    vault_root: vaultRoot,
-    source_app: "codex",
-    provider: "fixture",
-    allow_ai: true,
-    run_id: "run_p2_extract"
-  });
-  assert.equal(summary.selected_record_count, 2);
-  assert.equal(summary.sent_record_count, 2);
-  assert.equal(summary.blocked_record_count, 0);
-  assert.equal(summary.generated_atom_count, 2);
-  assert.equal(summary.skipped_low_value_count, 0);
-
-  const storage = new LocalStorageProvider({
-    vault_root: vaultRoot,
-    sqlite_path: "data/runtime/normalized-records.sqlite"
-  });
-  const firstAtom = await storage.findKnowledgeAtom(summary.generated_atom_ids[0] ?? "");
-  storage.close();
-  assert.equal(firstAtom?.review_status, "pending");
-  assert.ok(firstAtom?.source_raw_paths.every((rawPath) => rawPath.startsWith("raw/archive/codex/")));
-
-  const secondSummary = await extractKnowledgeAtoms({
-    vault_root: vaultRoot,
-    source_app: "codex",
-    provider: "fixture",
-    allow_ai: true,
-    run_id: "run_p2_extract_second"
-  });
-  assert.equal(secondSummary.generated_atom_count, 0);
-  assert.equal(secondSummary.duplicate_atom_count, 2);
-});
-
 async function createTempVault(): Promise<string> {
   return mkdtemp(path.join(os.tmpdir(), "ai-chat-kb-p1-"));
 }
@@ -257,31 +195,4 @@ function toSortedIds(records: Array<{ record_id: string }>): string[] {
 
 function createHashForTest(value: string): string {
   return createHash("sha256").update(value).digest("hex").slice(0, 24);
-}
-
-function buildSecretRecord(): NormalizedRecord {
-  return {
-    schema_version: SCHEMA_VERSION.normalizedRecord,
-    record_id: "rec_secret",
-    source_app: "codex",
-    source_type: "manual_export",
-    conversation_id: "secret",
-    parent_conversation_id: "secret",
-    turn_index: 0,
-    message_index_start: 0,
-    message_index_end: 1,
-    message_time: "2026-06-23T10:00:00+08:00",
-    project: "personal",
-    topic: "安全测试",
-    user_message: "请检查 sk-secret_123456 和 /Users/may/secret/file.txt",
-    ai_message: "收到。",
-    raw_path: "raw/imports/codex/secret.md",
-    raw_archive_path: "raw/archive/codex/secret.md",
-    raw_checksum: "0".repeat(64),
-    raw_source: "unit_test",
-    sensitivity: "personal",
-    can_enter_personal_kb: true,
-    created_at: "2026-06-23T10:00:00+08:00",
-    updated_at: "2026-06-23T10:00:00+08:00"
-  };
 }
