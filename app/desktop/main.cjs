@@ -1,13 +1,27 @@
 const { app, BrowserWindow, dialog, ipcMain, Notification, powerMonitor } = require("electron");
+const { autoUpdater } = require("electron-updater");
 const { spawn } = require("node:child_process");
 const { copyFile, mkdir, readdir, readFile, writeFile } = require("node:fs/promises");
 const path = require("node:path");
 
-const repoRoot = path.resolve(__dirname, "../..");
+const devRoot = path.resolve(__dirname, "../..");
+const runtimeRoot = app.isPackaged ? path.join(process.resourcesPath, "app.asar.unpacked") : devRoot;
+const assetRoot = app.isPackaged ? app.getAppPath() : devRoot;
 const sourceApps = ["codex", "cursor", "deepseek", "doubao", "workbuddy"];
 const AUTOMATION_CHECK_MS = 30_000;
+const releaseInfo = {
+  app_name: "AI Chat Knowledge",
+  app_id: "com.villweb.aichatknowledge",
+  executable_name: "AI Chat Knowledge",
+  data_dir_name: "AI Chat Knowledge",
+  default_vault_dir_name: "vault",
+  update_channel: "stable",
+  update_url: "https://updates.villweb.com/ai-chat-knowledge-system",
+  update_url_env: "AI_KB_UPDATE_URL",
+  uninstall_policy: "retain_user_data"
+};
 const state = {
-  vaultRoot: repoRoot,
+  vaultRoot: "",
   sourceApp: "codex",
   aiProvider: "fixture",
   apiKeyConfigured: false,
@@ -44,11 +58,13 @@ function createWindow() {
   if (devServer) {
     void win.loadURL(devServer);
   } else {
-    void win.loadFile(path.join(repoRoot, "dist/desktop/index.html"));
+    void win.loadFile(path.join(assetRoot, "dist/desktop/index.html"));
   }
 }
 
 app.whenReady().then(() => {
+  state.vaultRoot = buildDefaultVaultRoot();
+  configureAutoUpdater();
   registerIpc();
   createWindow();
   startAutomationTimer();
@@ -77,6 +93,7 @@ function registerIpc() {
       atoms: await listAtoms(),
       knowledge: await getKnowledgeView({}),
       privacy,
+      release: getReleaseState(),
       logs: await listLogs()
     };
   });
@@ -305,13 +322,19 @@ function registerIpc() {
   });
 
   ipcMain.handle("automation:list-history", async () => listDailyRunHistory());
+  ipcMain.handle("release:get-state", async () => getReleaseState());
+  ipcMain.handle("release:check-for-updates", async () => checkForUpdates());
 }
 
 function runCommand(command, args, stdin) {
   return new Promise((resolve) => {
+    const env = { ...process.env };
+    if (app.isPackaged) {
+      env.ELECTRON_RUN_AS_NODE = "1";
+    }
     const child = spawn(command, args, {
-      cwd: repoRoot,
-      env: { ...process.env },
+      cwd: runtimeRoot,
+      env,
       shell: false
     });
     let stdout = "";
@@ -333,11 +356,44 @@ function runCommand(command, args, stdin) {
 }
 
 function runScript(scriptPath, args, stdin) {
-  return runCommand(getNodeBinary(), ["--import", "tsx", path.join(repoRoot, scriptPath), ...args], stdin);
+  return runCommand(getNodeBinary(), ["--import", "tsx", path.join(runtimeRoot, scriptPath), ...args], stdin);
 }
 
 function getNodeBinary() {
+  if (app.isPackaged) {
+    return process.execPath;
+  }
   return process.env.AI_KB_NODE_BINARY || process.env.npm_node_execpath || "node";
+}
+
+function buildDefaultVaultRoot() {
+  return process.env.AI_KB_VAULT_ROOT || path.join(app.getPath("userData"), releaseInfo.default_vault_dir_name);
+}
+
+function getReleaseState() {
+  return {
+    ...releaseInfo,
+    version: app.getVersion(),
+    is_packaged: app.isPackaged,
+    app_data_dir: app.getPath("userData"),
+    default_vault_root: buildDefaultVaultRoot(),
+    update_enabled: app.isPackaged || Boolean(process.env[releaseInfo.update_url_env])
+  };
+}
+
+function configureAutoUpdater() {
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = false;
+  const updateUrl = process.env[releaseInfo.update_url_env];
+  autoUpdater.setFeedURL({ provider: "generic", url: updateUrl || releaseInfo.update_url, channel: releaseInfo.update_channel });
+}
+
+async function checkForUpdates() {
+  if (!app.isPackaged && !process.env[releaseInfo.update_url_env]) {
+    return { enabled: false, message: "未配置更新发布地址。" };
+  }
+  const result = await autoUpdater.checkForUpdates();
+  return { enabled: true, update_info: result?.updateInfo ?? null };
 }
 
 async function listAtoms() {

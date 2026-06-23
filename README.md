@@ -18,6 +18,7 @@ AI Chat Knowledge System 是一个本地优先的 AI 对话知识沉淀系统。
 - 支持知识库搜索、来源/类型/项目/标签筛选、每日沉淀日历、Markdown 导出、Obsidian 索引、本地备份和恢复。
 - 支持本地敏感内容识别、来源授权说明、原始记录保留策略、按来源删除、用户数据导出和彻底删除。
 - 支持 API Key 本地加密保存，避免明文散落在普通配置文件中。
+- 支持 macOS DMG/ZIP、Windows NSIS/portable 安装包配置、发布通道和应用更新检查入口。
 
 ## 数据和隐私边界
 
@@ -33,7 +34,7 @@ AI Chat Knowledge System 是一个本地优先的 AI 对话知识沉淀系统。
 
 ## 当前项目状态
 
-项目已经完成本地核心引擎、AI 提炼、桌面端最小版本、首批连接器、每日自动化、知识库体验和基础隐私安全能力。后续重点包括跨平台安装包、商业化能力和上线前质量检查。
+项目已经完成本地核心引擎、AI 提炼、桌面端最小版本、首批连接器、每日自动化、知识库体验、基础隐私安全能力和跨平台安装包配置。后续重点包括商业化能力和上线前质量检查。
 
 ## 目录结构
 
@@ -88,6 +89,24 @@ npm run desktop:dev
 
 ```bash
 npm run desktop:build
+```
+
+生成本机打包目录：
+
+```bash
+npm run desktop:pack
+```
+
+生成 macOS 安装包：
+
+```bash
+npm run desktop:dist:mac
+```
+
+生成 Windows 安装包：
+
+```bash
+npm run desktop:dist:win
 ```
 
 ## 常用命令

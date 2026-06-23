@@ -18,6 +18,7 @@ import {
   KeyRound,
   ListChecks,
   Lock,
+  PackageCheck,
   Play,
   RefreshCw,
   Search,
@@ -185,6 +186,23 @@ interface SensitiveScanResult {
   findings: Array<{ rule_id: string; label: string; sensitivity: string; severity: string; match_preview: string }>;
 }
 
+interface ReleaseState {
+  app_name: string;
+  app_id: string;
+  executable_name: string;
+  data_dir_name: string;
+  default_vault_dir_name: string;
+  update_channel: string;
+  update_url: string;
+  update_url_env: string;
+  uninstall_policy: string;
+  version: string;
+  is_packaged: boolean;
+  app_data_dir: string;
+  default_vault_root: string;
+  update_enabled: boolean;
+}
+
 interface DesktopState {
   vaultRoot: string;
   sourceApp: string;
@@ -196,6 +214,7 @@ interface DesktopState {
   atoms: KnowledgeAtomDocument[];
   knowledge: KnowledgeLibraryView;
   privacy: PrivacySecurityState;
+  release: ReleaseState;
   logs: LogEvent[];
 }
 
@@ -238,6 +257,8 @@ interface DesktopApi {
   exportUserData(): Promise<unknown>;
   deleteAllUserData(): Promise<unknown>;
   writePrivacyLegalDrafts(): Promise<unknown>;
+  getReleaseState(): Promise<ReleaseState>;
+  checkForUpdates(): Promise<unknown>;
   listLogs(): Promise<LogEvent[]>;
   setConnectorEnabled(input: { sourceApp: string; enabled: boolean }): Promise<unknown>;
   getAutomationState(): Promise<DailyAutomationState>;
@@ -327,6 +348,7 @@ function getDesktopApi(): DesktopApi {
     atoms: [sampleAtom, duplicateAtom],
     knowledge: buildPreviewKnowledge([sampleAtom, duplicateAtom]),
     privacy: buildPreviewPrivacy(),
+    release: buildPreviewRelease(),
     logs: [sampleLog]
   };
 
@@ -415,6 +437,12 @@ function getDesktopApi(): DesktopApi {
     async writePrivacyLegalDrafts() {
       return { privacy_policy_path: "legal/隐私政策草案.md", terms_path: "legal/用户协议草案.md" };
     },
+    async getReleaseState() {
+      return previewState.release;
+    },
+    async checkForUpdates() {
+      return { enabled: false, message: "预览模式未配置更新发布地址。" };
+    },
     async listLogs() {
       return previewState.logs;
     },
@@ -468,6 +496,25 @@ function getDesktopApi(): DesktopApi {
       previewState.apiKeyConfigured = Boolean(input.apiKey);
       return previewState;
     }
+  };
+}
+
+function buildPreviewRelease(): ReleaseState {
+  return {
+    app_name: "AI Chat Knowledge",
+    app_id: "com.villweb.aichatknowledge",
+    executable_name: "AI Chat Knowledge",
+    data_dir_name: "AI Chat Knowledge",
+    default_vault_dir_name: "vault",
+    update_channel: "stable",
+    update_url: "https://updates.villweb.com/ai-chat-knowledge-system",
+    update_url_env: "AI_KB_UPDATE_URL",
+    uninstall_policy: "retain_user_data",
+    version: "0.1.0",
+    is_packaged: false,
+    app_data_dir: "~/Library/Application Support/AI Chat Knowledge",
+    default_vault_root: "~/Library/Application Support/AI Chat Knowledge/vault",
+    update_enabled: false
   };
 }
 
@@ -750,7 +797,7 @@ function App() {
         )}
         {active === "pending" && <PendingPanel atoms={filteredAtoms} counts={counts} query={query} selectedId={selected?.atom.atom_id ?? ""} onQuery={setQuery} onSelect={(atomId) => { setSelectedId(atomId); setActive("detail"); }} />}
         {active === "detail" && selected && <DetailPanel document={selected} atoms={state.atoms} busy={busy} onUpdate={(input) => withBusy(() => desktopApi.updateAtom(input), "知识已更新")} />}
-        {active === "settings" && <SettingsPanel state={state} busy={busy} onSave={(input) => withBusy(() => desktopApi.saveSessionConfig(input), "会话配置已保存")} />}
+        {active === "settings" && <SettingsPanel state={state} busy={busy} onSave={(input) => withBusy(() => desktopApi.saveSessionConfig(input), "会话配置已保存")} onCheckUpdates={() => withBusy(() => desktopApi.checkForUpdates(), "更新检查完成")} />}
         {active === "logs" && <LogsPanel logs={[...state.events, ...state.logs]} />}
       </section>
     </main>
@@ -1188,7 +1235,17 @@ function DetailPanel({ document, atoms, busy, onUpdate }: { document: KnowledgeA
   );
 }
 
-function SettingsPanel({ state, busy, onSave }: { state: DesktopState; busy: boolean; onSave: (input: SessionConfigInput) => void }) {
+function SettingsPanel({
+  state,
+  busy,
+  onSave,
+  onCheckUpdates
+}: {
+  state: DesktopState;
+  busy: boolean;
+  onSave: (input: SessionConfigInput) => void;
+  onCheckUpdates: () => void;
+}) {
   const [sourceApp, setSourceApp] = useState(state.sourceApp);
   const [aiProvider, setAiProvider] = useState(state.aiProvider);
   const [baseUrl, setBaseUrl] = useState("");
@@ -1196,17 +1253,35 @@ function SettingsPanel({ state, busy, onSave }: { state: DesktopState; busy: boo
   const [apiKey, setApiKey] = useState("");
 
   return (
-    <section className="panel settingsPanel">
-      <h2>设置</h2>
-      <div className="formGrid">
-        <label>默认来源<select value={sourceApp} onChange={(event) => setSourceApp(event.target.value)}>{state.connectors.filter((connector) => connector.status === "available" && connector.enabled).map((connector) => <option key={connector.source_app} value={connector.source_app}>{connector.display_name}</option>)}</select></label>
-        <label>AI 服务<select value={aiProvider} onChange={(event) => setAiProvider(event.target.value)}><option value="fixture">fixture</option><option value="openai-compatible">openai-compatible</option></select></label>
-        <label>Base URL<input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://api.example.com/v1" /></label>
-        <label>模型<input value={model} onChange={(event) => setModel(event.target.value)} placeholder="model-name" /></label>
-        <label>API Key<input value={apiKey} onChange={(event) => setApiKey(event.target.value)} type="password" placeholder="本地加密保存" /></label>
-      </div>
-      <button className="primary" onClick={() => onSave({ sourceApp, aiProvider, baseUrl, model, apiKey })} disabled={busy}><Shield size={17} /><span>保存会话配置</span></button>
-    </section>
+    <div className="grid two">
+      <section className="panel settingsPanel">
+        <h2>设置</h2>
+        <div className="formGrid">
+          <label>默认来源<select value={sourceApp} onChange={(event) => setSourceApp(event.target.value)}>{state.connectors.filter((connector) => connector.status === "available" && connector.enabled).map((connector) => <option key={connector.source_app} value={connector.source_app}>{connector.display_name}</option>)}</select></label>
+          <label>AI 服务<select value={aiProvider} onChange={(event) => setAiProvider(event.target.value)}><option value="fixture">fixture</option><option value="openai-compatible">openai-compatible</option></select></label>
+          <label>Base URL<input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://api.example.com/v1" /></label>
+          <label>模型<input value={model} onChange={(event) => setModel(event.target.value)} placeholder="model-name" /></label>
+          <label>API Key<input value={apiKey} onChange={(event) => setApiKey(event.target.value)} type="password" placeholder="本地加密保存" /></label>
+        </div>
+        <button className="primary" onClick={() => onSave({ sourceApp, aiProvider, baseUrl, model, apiKey })} disabled={busy}><Shield size={17} /><span>保存会话配置</span></button>
+      </section>
+
+      <section className="panel releasePanel">
+        <h2>发布状态</h2>
+        <div className="releaseGrid">
+          <span>应用</span><strong>{state.release.app_name}</strong>
+          <span>版本</span><strong>{state.release.version}</strong>
+          <span>包名</span><strong>{state.release.app_id}</strong>
+          <span>运行</span><strong>{state.release.is_packaged ? "安装包" : "开发预览"}</strong>
+          <span>数据目录</span><strong>{compactPath(state.release.app_data_dir)}</strong>
+          <span>默认 vault</span><strong>{compactPath(state.release.default_vault_root)}</strong>
+          <span>更新通道</span><strong>{state.release.update_channel}</strong>
+          <span>更新地址</span><strong>{state.release.update_url}</strong>
+          <span>卸载策略</span><strong>{state.release.uninstall_policy === "retain_user_data" ? "保留用户数据" : state.release.uninstall_policy}</strong>
+        </div>
+        <button className="secondary" onClick={onCheckUpdates} disabled={busy || !state.release.update_enabled}><PackageCheck size={17} /><span>检查更新</span></button>
+      </section>
+    </div>
   );
 }
 

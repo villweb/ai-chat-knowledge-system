@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld("desktopApi", {
   exportUserData: () => ipcRenderer.invoke("privacy:export-user-data"),
   deleteAllUserData: () => ipcRenderer.invoke("privacy:delete-all-user-data"),
   writePrivacyLegalDrafts: () => ipcRenderer.invoke("privacy:write-legal-drafts"),
+  getReleaseState: () => ipcRenderer.invoke("release:get-state"),
+  checkForUpdates: () => ipcRenderer.invoke("release:check-for-updates"),
   listLogs: () => ipcRenderer.invoke("logs:list"),
   setConnectorEnabled: (input) => ipcRenderer.invoke("connectors:set-enabled", input),
   getAutomationState: () => ipcRenderer.invoke("automation:get-state"),
