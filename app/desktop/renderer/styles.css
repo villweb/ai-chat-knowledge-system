@@ -220,6 +220,208 @@ nav {
   background: #edf6ff;
   color: #16364f;
   font-size: 14px;
+  line-height: 1.55;
+}
+
+.notice.error {
+  border-color: #efb6b6;
+  background: #fff5f5;
+  color: #7a2323;
+}
+
+.topbarActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.pipelineStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid #d9e1de;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #33413d;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.pipelineStatus.phase-processing,
+.pipelineStatus.phase-importing {
+  border-color: #b8d9f0;
+  background: #edf6ff;
+  color: #16364f;
+}
+
+.pipelineStatus.phase-waiting_review {
+  border-color: #f0d9a6;
+  background: #fffaf0;
+  color: #6b4f12;
+}
+
+.pipelineStatus.phase-done {
+  border-color: #b8dfc4;
+  background: #eef9f1;
+  color: #1d6333;
+}
+
+.pipelineMeta {
+  padding-left: 8px;
+  border-left: 1px solid #d9e1de;
+  color: #64736e;
+  font-weight: 600;
+}
+
+.nextAction {
+  min-height: 40px;
+}
+
+.navBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #e8f5e9;
+  color: #1d6333;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.nav .navBadge {
+  margin-left: auto;
+  background: #7fd15a;
+  color: #101815;
+}
+
+.onboardingBanner {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid #cfe0d8;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #f7fbf8 0%, #ffffff 100%);
+}
+
+.onboardingHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.onboardingHead strong {
+  color: #17221f;
+  font-size: 15px;
+}
+
+.onboardingSteps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.onboardingStep {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid #dce3e0;
+  border-radius: 8px;
+  background: #ffffff;
+  opacity: 0.72;
+}
+
+.onboardingStep.active {
+  border-color: #8fbea3;
+  background: #f4fbf6;
+  opacity: 1;
+}
+
+.onboardingStep strong,
+.onboardingStep small {
+  display: block;
+}
+
+.onboardingStep strong {
+  color: #17221f;
+  font-size: 13px;
+}
+
+.onboardingStep small {
+  margin-top: 4px;
+  color: #64736e;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.stepNumber {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 999px;
+  background: #eef2f0;
+  color: #33413d;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.onboardingStep.active .stepNumber {
+  background: #23724f;
+  color: #ffffff;
+}
+
+.onboardingActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.importMeta {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0 14px;
+  padding: 10px 12px;
+  border: 1px solid #dce3e0;
+  border-radius: 8px;
+  background: #f8faf9;
+  color: #55645f;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.importCta {
+  width: 100%;
+  max-width: 360px;
+}
+
+.hint {
+  margin-top: 12px;
+}
+
+.emptyState {
+  display: grid;
+  gap: 8px;
+  padding: 28px 16px;
+  border: 1px dashed #d5dedb;
+  border-radius: 8px;
+  background: #fafcfb;
+  text-align: center;
+}
+
+.emptyState p {
+  margin: 0;
+  color: #34443f;
+  line-height: 1.6;
 }
 
 .grid {
@@ -1085,6 +1287,16 @@ nav {
   .detailHead {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .topbar,
+  .topbarActions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .onboardingSteps {
+    grid-template-columns: 1fr;
   }
 
   .eventRow,
