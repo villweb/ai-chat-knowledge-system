@@ -117,6 +117,29 @@ test("runManualImportNormalization archives raw files, writes SQLite records, pe
   assert.equal(inboxFilesAfterSecondRun.length, 2);
 });
 
+test("rebuildLocalIndexes skips Obsidian _index.md without YAML front matter", async () => {
+  const vaultRoot = await createTempVault();
+  await writeCodexSamples(vaultRoot);
+  await runManualImportNormalization({
+    vault_root: vaultRoot,
+    source_app: "codex",
+    run_id: "run_p1_index_skip"
+  });
+
+  const knowledgeDir = path.join(vaultRoot, "knowledge");
+  await mkdir(knowledgeDir, { recursive: true });
+  await writeFile(path.join(knowledgeDir, "_index.md"), `# Knowledge Index
+
+Updated at: 2026-06-23T00:00:00.000Z
+
+## Pending
+- [[inbox/sample]] 示例条目
+`, "utf8");
+
+  const rebuildSummary = await rebuildLocalIndexes({ vault_root: vaultRoot });
+  assert.equal(rebuildSummary.knowledge_atom_count, 2);
+});
+
 test("log sanitization and safe title formatting stay stable", () => {
   const event = buildRunLogEvent({
     run_id: "run_test",
