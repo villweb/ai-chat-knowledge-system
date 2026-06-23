@@ -1,0 +1,118 @@
+name: Release Build
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos
+            os: macos-latest
+            script: desktop:dist:mac
+          - platform: windows
+            os: windows-latest
+            script: desktop:dist:win
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Quality gate
+        run: npm run quality:gate
+
+      - name: Launch readiness report
+        run: npm run launch:readiness
+        env:
+          AI_KB_UPDATE_URL: ${{ vars.AI_KB_UPDATE_URL }}
+          AI_KB_LICENSE_PUBLIC_KEY: ${{ secrets.AI_KB_LICENSE_PUBLIC_KEY }}
+          AI_KB_LICENSE_SERVER_URL: ${{ vars.AI_KB_LICENSE_SERVER_URL }}
+          AI_KB_PAYMENT_URL: ${{ vars.AI_KB_PAYMENT_URL }}
+          AI_KB_ACCOUNT_URL: ${{ vars.AI_KB_ACCOUNT_URL }}
+          AI_KB_FEEDBACK_URL: ${{ vars.AI_KB_FEEDBACK_URL }}
+          AI_KB_SUPPORT_EMAIL: ${{ vars.AI_KB_SUPPORT_EMAIL }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+
+      - name: Build installer
+        run: npm run ${{ matrix.script }}
+        env:
+          AI_KB_UPDATE_URL: ${{ vars.AI_KB_UPDATE_URL }}
+          AI_KB_LICENSE_PUBLIC_KEY: ${{ secrets.AI_KB_LICENSE_PUBLIC_KEY }}
+          AI_KB_LICENSE_SERVER_URL: ${{ vars.AI_KB_LICENSE_SERVER_URL }}
+          AI_KB_PAYMENT_URL: ${{ vars.AI_KB_PAYMENT_URL }}
+          AI_KB_ACCOUNT_URL: ${{ vars.AI_KB_ACCOUNT_URL }}
+          AI_KB_FEEDBACK_URL: ${{ vars.AI_KB_FEEDBACK_URL }}
+          AI_KB_SUPPORT_EMAIL: ${{ vars.AI_KB_SUPPORT_EMAIL }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-chat-knowledge-${{ matrix.platform }}
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/*.exe
+            release/*.blockmap
+            release/*.yml
+          if-no-files-found: error
+
+  publish:
+    name: Publish draft release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: |
+            release-artifacts/*.dmg
+            release-artifacts/*.zip
+            release-artifacts/*.exe
+            release-artifacts/*.blockmap
+            release-artifacts/*.yml

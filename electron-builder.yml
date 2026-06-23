@@ -1,0 +1,88 @@
+appId: com.villweb.aichatknowledge
+productName: AI Chat Knowledge
+artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
+copyright: "Copyright © 2026 Villweb"
+
+directories:
+  output: release
+  buildResources: resources
+
+files:
+  - package.json
+  - app/**/*
+  - scripts/**/*
+  - prompts/**/*
+  - dist/desktop/**/*
+  - node_modules/**/*
+  - "!spec/**/*"
+  - "!tests/**/*"
+  - "!raw/**/*"
+  - "!knowledge/**/*"
+  - "!logs/**/*"
+  - "!data/**/*"
+
+asar: true
+asarUnpack:
+  - package.json
+  - app/**/*
+  - scripts/**/*
+  - prompts/**/*
+  - node_modules/better-sqlite3/**/*
+  - node_modules/bindings/**/*
+  - node_modules/file-uri-to-path/**/*
+  - node_modules/tsx/**/*
+  - node_modules/esbuild/**/*
+  - node_modules/@esbuild/**/*
+  - node_modules/get-tsconfig/**/*
+  - node_modules/resolve-pkg-maps/**/*
+  - node_modules/yaml/**/*
+
+npmRebuild: true
+buildDependenciesFromSource: true
+
+publish:
+  provider: generic
+  url: https://updates.villweb.com/ai-chat-knowledge-system
+  channel: stable
+
+mac:
+  icon: resources/icons/icon.icns
+  target:
+    - dmg
+    - zip
+  category: public.app-category.productivity
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  extendInfo:
+    NSDocumentsFolderUsageDescription: "用户可以选择本地 AI 对话导出目录用于知识沉淀。"
+    NSDownloadsFolderUsageDescription: "用户可以选择下载目录中的 AI 对话导出文件。"
+
+dmg:
+  sign: false
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+
+win:
+  icon: resources/icons/icon.ico
+  target:
+    - nsis
+    - portable
+  requestedExecutionLevel: asInvoker
+
+nsis:
+  artifactName: "${productName}-${version}-${os}-${arch}-setup.${ext}"
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: AI Chat Knowledge
+
+portable:
+  artifactName: "${productName}-${version}-${os}-${arch}-portable.${ext}"

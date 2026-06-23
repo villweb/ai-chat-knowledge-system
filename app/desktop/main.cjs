@@ -1,13 +1,27 @@
 const { app, BrowserWindow, dialog, ipcMain, Notification, powerMonitor } = require("electron");
+const { autoUpdater } = require("electron-updater");
 const { spawn } = require("node:child_process");
 const { copyFile, mkdir, readdir, readFile, writeFile } = require("node:fs/promises");
 const path = require("node:path");
 
-const repoRoot = path.resolve(__dirname, "../..");
+const devRoot = path.resolve(__dirname, "../..");
+const runtimeRoot = app.isPackaged ? path.join(process.resourcesPath, "app.asar.unpacked") : devRoot;
+const assetRoot = app.isPackaged ? app.getAppPath() : devRoot;
 const sourceApps = ["codex", "cursor", "deepseek", "doubao", "workbuddy"];
 const AUTOMATION_CHECK_MS = 30_000;
+const releaseInfo = {
+  app_name: "AI Chat Knowledge",
+  app_id: "com.villweb.aichatknowledge",
+  executable_name: "AI Chat Knowledge",
+  data_dir_name: "AI Chat Knowledge",
+  default_vault_dir_name: "vault",
+  update_channel: "stable",
+  update_url: "https://updates.villweb.com/ai-chat-knowledge-system",
+  update_url_env: "AI_KB_UPDATE_URL",
+  uninstall_policy: "retain_user_data"
+};
 const state = {
-  vaultRoot: repoRoot,
+  vaultRoot: "",
   sourceApp: "codex",
   aiProvider: "fixture",
   apiKeyConfigured: false,
@@ -44,11 +58,13 @@ function createWindow() {
   if (devServer) {
     void win.loadURL(devServer);
   } else {
-    void win.loadFile(path.join(repoRoot, "dist/desktop/index.html"));
+    void win.loadFile(path.join(assetRoot, "dist/desktop/index.html"));
   }
 }
 
 app.whenReady().then(() => {
+  state.vaultRoot = buildDefaultVaultRoot();
+  configureAutoUpdater();
   registerIpc();
   createWindow();
   startAutomationTimer();
@@ -67,14 +83,21 @@ app.on("activate", () => {
 });
 
 function registerIpc() {
-  ipcMain.handle("app:get-state", async () => ({
-    ...state,
-    automation: await getAutomationState(),
-    connectors: await listConnectors(),
-    atoms: await listAtoms(),
-    knowledge: await getKnowledgeView({}),
-    logs: await listLogs()
-  }));
+  ipcMain.handle("app:get-state", async () => {
+    const privacy = await getPrivacyState();
+    return {
+      ...state,
+      apiKeyConfigured: state.apiKeyConfigured || privacy.secure_credentials.openai_compatible_saved,
+      automation: await getAutomationState(),
+      connectors: await listConnectors(),
+      atoms: await listAtoms(),
+      knowledge: await getKnowledgeView({}),
+      privacy,
+      release: getReleaseState(),
+      commercial: await getCommercialState(),
+      logs: await listLogs()
+    };
+  });
 
   ipcMain.handle("vault:choose", async () => {
     const result = await dialog.showOpenDialog({ properties: ["openDirectory"] });
@@ -96,6 +119,15 @@ function registerIpc() {
     state.apiKeyConfigured = Boolean(input.apiKey);
     if (input.apiKey) {
       process.env.AI_KB_OPENAI_API_KEY = input.apiKey;
+      const credentialResult = await runScript("scripts/privacy-security.ts", ["save-credential", "--vault-root", state.vaultRoot], JSON.stringify({
+        service: "openai-compatible",
+        api_key: input.apiKey,
+        base_url: input.baseUrl ?? "",
+        model: input.model ?? ""
+      }));
+      if (!credentialResult.ok) {
+        throw new Error(credentialResult.stderr || "API Key 加密保存失败。");
+      }
     }
     if (input.baseUrl) {
       process.env.AI_KB_OPENAI_BASE_URL = input.baseUrl;
@@ -103,7 +135,7 @@ function registerIpc() {
     if (input.model) {
       process.env.AI_KB_OPENAI_MODEL = input.model;
     }
-    pushEvent("settings_saved", "AI 服务配置已保存到当前会话。");
+    pushEvent("settings_saved", input.apiKey ? "AI 服务配置已保存，API Key 已本地加密保存。" : "AI 服务配置已保存。");
     return { ok: true, aiProvider: state.aiProvider, apiKeyConfigured: state.apiKeyConfigured };
   });
 
@@ -233,6 +265,18 @@ function registerIpc() {
     return JSON.parse(result.stdout);
   });
 
+  ipcMain.handle("privacy:get-state", async () => getPrivacyState());
+  ipcMain.handle("privacy:save-settings", async (_event, input) => runPrivacyAction("save-settings", input ?? {}, "保存隐私设置失败。"));
+  ipcMain.handle("privacy:scan", async (_event, input) => runPrivacyAction("scan", input ?? {}, "敏感内容扫描失败。"));
+  ipcMain.handle("privacy:apply-retention", async () => runPrivacyAction("apply-retention", undefined, "执行原始记录保留策略失败。"));
+  ipcMain.handle("privacy:delete-source", async (_event, input) => {
+    if (!input?.source_app) throw new Error("缺少要删除的来源。");
+    return runPrivacyAction("delete-source", undefined, "删除来源数据失败。", ["--source-app", input.source_app]);
+  });
+  ipcMain.handle("privacy:export-user-data", async () => runPrivacyAction("export-user-data", undefined, "导出用户数据失败。"));
+  ipcMain.handle("privacy:delete-all-user-data", async () => runPrivacyAction("delete-all-user-data", undefined, "彻底删除用户数据失败。"));
+  ipcMain.handle("privacy:write-legal-drafts", async () => runPrivacyAction("write-legal-drafts", undefined, "生成隐私政策和用户协议草案失败。"));
+
   ipcMain.handle("logs:list", async () => listLogs());
 
   ipcMain.handle("automation:get-state", async () => getAutomationState());
@@ -279,13 +323,24 @@ function registerIpc() {
   });
 
   ipcMain.handle("automation:list-history", async () => listDailyRunHistory());
+  ipcMain.handle("release:get-state", async () => getReleaseState());
+  ipcMain.handle("release:check-for-updates", async () => checkForUpdates());
+
+  ipcMain.handle("commercial:get-state", async () => getCommercialState());
+  ipcMain.handle("commercial:activate-license", async (_event, input) => runCommercialAction("activate-license", input ?? {}, "激活授权失败。"));
+  ipcMain.handle("commercial:save-account", async (_event, input) => runCommercialAction("save-account", input ?? {}, "保存账号入口失败。"));
+  ipcMain.handle("commercial:create-feedback", async (_event, input) => runCommercialAction("create-feedback", input ?? {}, "创建反馈草稿失败。"));
 }
 
 function runCommand(command, args, stdin) {
   return new Promise((resolve) => {
+    const env = { ...process.env };
+    if (app.isPackaged) {
+      env.ELECTRON_RUN_AS_NODE = "1";
+    }
     const child = spawn(command, args, {
-      cwd: repoRoot,
-      env: { ...process.env },
+      cwd: runtimeRoot,
+      env,
       shell: false
     });
     let stdout = "";
@@ -307,11 +362,44 @@ function runCommand(command, args, stdin) {
 }
 
 function runScript(scriptPath, args, stdin) {
-  return runCommand(getNodeBinary(), ["--import", "tsx", path.join(repoRoot, scriptPath), ...args], stdin);
+  return runCommand(getNodeBinary(), ["--import", "tsx", path.join(runtimeRoot, scriptPath), ...args], stdin);
 }
 
 function getNodeBinary() {
+  if (app.isPackaged) {
+    return process.execPath;
+  }
   return process.env.AI_KB_NODE_BINARY || process.env.npm_node_execpath || "node";
+}
+
+function buildDefaultVaultRoot() {
+  return process.env.AI_KB_VAULT_ROOT || path.join(app.getPath("userData"), releaseInfo.default_vault_dir_name);
+}
+
+function getReleaseState() {
+  return {
+    ...releaseInfo,
+    version: app.getVersion(),
+    is_packaged: app.isPackaged,
+    app_data_dir: app.getPath("userData"),
+    default_vault_root: buildDefaultVaultRoot(),
+    update_enabled: app.isPackaged || Boolean(process.env[releaseInfo.update_url_env])
+  };
+}
+
+function configureAutoUpdater() {
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = false;
+  const updateUrl = process.env[releaseInfo.update_url_env];
+  autoUpdater.setFeedURL({ provider: "generic", url: updateUrl || releaseInfo.update_url, channel: releaseInfo.update_channel });
+}
+
+async function checkForUpdates() {
+  if (!app.isPackaged && !process.env[releaseInfo.update_url_env]) {
+    return { enabled: false, message: "未配置更新发布地址。" };
+  }
+  const result = await autoUpdater.checkForUpdates();
+  return { enabled: true, update_info: result?.updateInfo ?? null };
 }
 
 async function listAtoms() {
@@ -358,6 +446,41 @@ async function listDailyRunHistory() {
     throw new Error(result.stderr || "读取运行历史失败。");
   }
 
+  return JSON.parse(result.stdout);
+}
+
+async function getPrivacyState() {
+  const result = await runScript("scripts/privacy-security.ts", ["state", "--vault-root", state.vaultRoot]);
+  if (!result.ok) {
+    throw new Error(result.stderr || "读取隐私安全状态失败。");
+  }
+  return JSON.parse(result.stdout);
+}
+
+async function getCommercialState() {
+  const result = await runScript("scripts/commercial.ts", ["state", "--vault-root", state.vaultRoot]);
+  if (!result.ok) {
+    throw new Error(result.stderr || "读取商业化状态失败。");
+  }
+  return JSON.parse(result.stdout);
+}
+
+async function runCommercialAction(action, input, errorMessage) {
+  const result = await runScript("scripts/commercial.ts", [action, "--vault-root", state.vaultRoot], JSON.stringify(input));
+  if (!result.ok) {
+    throw new Error(result.stderr || errorMessage);
+  }
+  pushEvent(`commercial_${action.replaceAll("-", "_")}`, errorMessage.replace("失败。", "完成。"));
+  return JSON.parse(result.stdout);
+}
+
+async function runPrivacyAction(action, input, errorMessage, extraArgs = []) {
+  const args = [action, "--vault-root", state.vaultRoot, ...extraArgs];
+  const result = await runScript("scripts/privacy-security.ts", args, input ? JSON.stringify(input) : undefined);
+  if (!result.ok) {
+    throw new Error(result.stderr || errorMessage);
+  }
+  pushEvent(`privacy_${action.replaceAll("-", "_")}`, errorMessage.replace("失败。", "完成。"));
   return JSON.parse(result.stdout);
 }
 
@@ -473,6 +596,10 @@ async function runDailyWorkflow(runDate, runIdPrefix) {
     throw new Error(importResult.stderr || "导入失败，已停止每日运行。");
   }
 
+  if (state.aiProvider === "openai-compatible") {
+    await loadSecureCredentialIntoEnv();
+  }
+
   const extractResult = await runScript("scripts/extract-knowledge-atoms.ts", extractArgs);
   if (!extractResult.ok) {
     pushEvent("daily_run", extractResult.stderr);
@@ -480,6 +607,21 @@ async function runDailyWorkflow(runDate, runIdPrefix) {
   }
 
   return { importResult, extractResult };
+}
+
+async function loadSecureCredentialIntoEnv() {
+  const result = await runScript("scripts/privacy-security.ts", ["load-credential", "--vault-root", state.vaultRoot]);
+  if (!result.ok) {
+    throw new Error(result.stderr || "读取本地加密 API Key 失败。");
+  }
+  const credential = JSON.parse(result.stdout);
+  if (!credential?.api_key) {
+    throw new Error("未配置本地加密 API Key。");
+  }
+  process.env.AI_KB_OPENAI_API_KEY = credential.api_key;
+  if (credential.base_url) process.env.AI_KB_OPENAI_BASE_URL = credential.base_url;
+  if (credential.model) process.env.AI_KB_OPENAI_MODEL = credential.model;
+  state.apiKeyConfigured = true;
 }
 
 async function writeAutomationFailureRun(runDate, runId, message) {

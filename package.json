@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "main": "app/desktop/main.cjs",
+  "productName": "AI Chat Knowledge",
   "description": "Local-first core for turning AI chat records into reviewable knowledge atoms.",
+  "author": "Villweb",
   "scripts": {
     "postinstall": "npm rebuild better-sqlite3 --build-from-source",
     "sqlite:rebuild": "npm rebuild better-sqlite3 --build-from-source",
@@ -12,6 +15,12 @@
     "desktop:dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && AI_KB_DESKTOP_DEV_SERVER=http://127.0.0.1:5173 electron app/desktop/main.cjs\"",
     "desktop:build": "vite build",
     "desktop:preview": "vite --host 127.0.0.1",
+    "desktop:pack": "tsx scripts/package-desktop.ts --dir",
+    "desktop:dist:mac": "tsx scripts/package-desktop.ts --mac",
+    "desktop:dist:win": "tsx scripts/package-desktop.ts --win",
+    "release:validate": "tsx scripts/release-config.ts",
+    "quality:gate": "tsx scripts/quality-gate.ts",
+    "launch:readiness": "tsx scripts/launch-readiness.ts",
     "p1:codex-import": "tsx scripts/run-manual-import-normalization.ts --source-app codex",
     "p1:rebuild-indexes": "tsx scripts/rebuild-local-indexes.ts",
     "p2:extract-candidates": "tsx scripts/extract-knowledge-atoms.ts --source-app codex --provider fixture --allow-ai"
@@ -27,16 +36,18 @@
     "@vitejs/plugin-react": "^6.0.3",
     "concurrently": "^10.0.3",
     "electron": "^42.4.1",
-    "tsx": "^4.22.4",
+    "electron-builder": "^26.15.3",
     "typescript": "^6.0.2",
     "vite": "^8.0.16",
     "wait-on": "^9.0.10"
   },
   "dependencies": {
     "better-sqlite3": "^12.11.1",
+    "electron-updater": "^6.8.9",
     "lucide-react": "^1.21.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
+    "tsx": "^4.22.4",
     "yaml": "^2.9.0"
   }
 }

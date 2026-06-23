@@ -42,6 +42,26 @@ button:disabled {
   font-size: 15px;
 }
 
+.bootBox {
+  display: grid;
+  gap: 12px;
+  width: min(520px, calc(100vw - 40px));
+  justify-items: center;
+  text-align: center;
+}
+
+.bootBox strong {
+  color: #16201c;
+  font-size: 18px;
+}
+
+.bootBox p {
+  margin: 0;
+  color: #5d6d68;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
 .shell {
   display: grid;
   grid-template-columns: 248px minmax(0, 1fr);
@@ -748,6 +768,89 @@ nav {
   background: #ffffff;
 }
 
+.privacyLayout {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr);
+  gap: 16px;
+}
+
+.privacyLayout .panel {
+  min-width: 0;
+}
+
+.privacyActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.privacyActions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 38px;
+  min-width: 0;
+  padding: 0 11px;
+  border: 1px solid #d7dfdc;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #17221f;
+}
+
+.secureState,
+.scanResult {
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+  padding: 11px;
+  border: 1px solid #dce3e0;
+  border-radius: 8px;
+  background: #f7f9f8;
+}
+
+.secureState {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+}
+
+.secureState span,
+.scanResult span {
+  color: #55645f;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.sourceAuthList,
+.ruleList {
+  display: grid;
+  gap: 9px;
+  max-height: 380px;
+  overflow: auto;
+}
+
+.sourceAuthRow,
+.ruleRow {
+  display: grid;
+  gap: 5px;
+  padding: 10px 11px;
+  border: 1px solid #dce3e0;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.sourceAuthRow span,
+.sourceAuthRow small,
+.ruleRow span,
+.ruleRow small {
+  color: #64736e;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
 .settingsPanel {
   max-width: 920px;
 }
@@ -774,6 +877,160 @@ nav {
 .eventRow strong {
   color: #18241f;
   font-size: 13px;
+}
+
+.releasePanel {
+  align-content: start;
+}
+
+.releaseGrid {
+  display: grid;
+  grid-template-columns: minmax(88px, 0.35fr) minmax(0, 1fr);
+  gap: 10px 14px;
+  margin-bottom: 16px;
+}
+
+.releaseGrid span,
+.releaseGrid strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.releaseGrid span {
+  color: #697873;
+}
+
+.releaseGrid strong {
+  color: #16241f;
+  font-weight: 700;
+}
+
+.commercialLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.commercialHero {
+  grid-column: 1 / -1;
+}
+
+.commercialStatus {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.commercialStatus strong,
+.commercialStatus span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.commercialStatus strong {
+  color: #172520;
+  font-size: 20px;
+}
+
+.commercialStatus span {
+  color: #5f706b;
+  font-size: 13px;
+  margin-top: 2px;
+}
+
+.commercialNotice {
+  display: grid;
+  gap: 4px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #dce3e0;
+  background: #ffffff;
+}
+
+.commercialNotice.warning {
+  border-color: #e8d7a6;
+  background: #fffaf0;
+}
+
+.commercialNotice.danger {
+  border-color: #efb6b6;
+  background: #fff5f5;
+}
+
+.commercialNotice strong {
+  color: #172520;
+  font-size: 13px;
+}
+
+.commercialNotice span {
+  color: #65766f;
+  font-size: 13px;
+}
+
+.planGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.planCard,
+.websiteRow {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid #dce3e0;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.planCard strong,
+.websiteRow strong {
+  color: #172520;
+}
+
+.planCard span,
+.planCard small,
+.websiteRow span,
+.websiteRow small {
+  color: #65766f;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.commercialActions,
+.commercialLinkList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.commercialLinkList a,
+.commercialActions a {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 13px;
+  border-radius: 8px;
+  border: 1px solid #d5dedb;
+  color: #173c35;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 700;
+  background: #ffffff;
+}
+
+.websiteList {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
 }
 
 @media (max-width: 900px) {
@@ -810,6 +1067,8 @@ nav {
   .grid.two,
   .grid.twoWide,
   .libraryLayout,
+  .privacyLayout,
+  .commercialLayout,
   .formGrid {
     grid-template-columns: 1fr;
   }
@@ -832,6 +1091,10 @@ nav {
   .sourceRow,
   .calendarRow {
     grid-template-columns: 1fr;
+  }
+
+  .releaseGrid {
+    grid-template-columns: minmax(80px, 0.3fr) minmax(0, 1fr);
   }
 }
 
@@ -862,5 +1125,23 @@ nav {
 
   .libraryToolbar button {
     flex: 1 1 150px;
+  }
+
+  .privacyActions button {
+    flex: 1 1 150px;
+  }
+
+  .planGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .commercialActions button,
+  .commercialActions a,
+  .commercialLinkList a {
+    flex: 1 1 160px;
+  }
+
+  .releaseGrid {
+    grid-template-columns: 1fr;
   }
 }

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Archive,
+  BadgeCheck,
   Bell,
   BookOpenCheck,
   CalendarClock,
@@ -10,26 +11,36 @@ import {
   Clock,
   Database,
   Download,
+  FileText,
   FileInput,
   Filter,
   FolderOpen,
+  Globe,
   HardDriveDownload,
+  KeyRound,
   ListChecks,
+  Lock,
+  Megaphone,
+  PackageCheck,
   Play,
   RefreshCw,
   Search,
   Settings,
   Shield,
+  ShoppingCart,
   Split,
   SquarePen,
+  Trash2,
   X
 } from "lucide-react";
 import "./styles.css";
 
 type ReviewStatus = "pending" | "approved" | "rejected" | "merged";
 type KnowledgeAtomType = "观点" | "方法" | "决策" | "经验" | "素材" | "问题" | "偏好";
-type NavKey = "guide" | "sources" | "import" | "run" | "library" | "pending" | "detail" | "settings" | "logs";
+type NavKey = "guide" | "sources" | "import" | "run" | "library" | "privacy" | "commercial" | "pending" | "detail" | "settings" | "logs";
 type SourceConnectorStatus = "available" | "reserved";
+type RawRetentionMode = "keep_forever" | "delete_after_days" | "delete_after_successful_run";
+type FeedbackCategory = "bug" | "feature" | "billing" | "other";
 
 interface KnowledgeAtom {
   atom_id: string;
@@ -159,6 +170,81 @@ interface SourceConnectorView {
   failure_help: string;
 }
 
+interface PrivacySecuritySettings {
+  require_source_authorization: boolean;
+  raw_retention_mode: RawRetentionMode;
+  raw_retention_days: number;
+  allow_cloud_ai_for_private: boolean;
+  updated_at: string;
+}
+
+interface PrivacySecurityState {
+  rules: Array<{ rule_id: string; label: string; sensitivity: string; severity: string; description: string }>;
+  settings: PrivacySecuritySettings;
+  sources: Array<{ source_app: string; display_name: string; status: string; authorized: boolean; permission_scope: string; reads: string[]; does_not_read: string[]; import_path: string }>;
+  secure_credentials: { openai_compatible_saved: boolean; updated_at: string | null };
+}
+
+interface SensitiveScanResult {
+  sensitivity: string;
+  can_enter_personal_kb: boolean;
+  findings: Array<{ rule_id: string; label: string; sensitivity: string; severity: string; match_preview: string }>;
+}
+
+interface ReleaseState {
+  app_name: string;
+  app_id: string;
+  executable_name: string;
+  data_dir_name: string;
+  default_vault_dir_name: string;
+  update_channel: string;
+  update_url: string;
+  update_url_env: string;
+  uninstall_policy: string;
+  version: string;
+  is_packaged: boolean;
+  app_data_dir: string;
+  default_vault_root: string;
+  update_enabled: boolean;
+}
+
+interface CommercialPlan {
+  plan_id: string;
+  label: string;
+  price_label: string;
+  feature_ids: string[];
+  limits: { daily_runs: number | "unlimited"; connectors: number | "unlimited"; automation: boolean; export_existing_data: boolean };
+}
+
+interface CommercialState {
+  plans: CommercialPlan[];
+  runtime: {
+    plan_id: string;
+    license_status: string;
+    trial_started_at: string;
+    trial_ends_at: string;
+    account_email: string;
+    license_id: string;
+    activated_at: string;
+    expires_at: string;
+    offline_valid_until: string;
+    updated_at: string;
+  };
+  access: {
+    effective_plan_id: string;
+    can_use_paid_features: boolean;
+    can_export_existing_data: boolean;
+    blocked_feature_ids: string[];
+    days_until_trial_end: number;
+    days_until_license_expiry: number;
+  };
+  notices: Array<{ level: string; title: string; message: string }>;
+  purchase: { purchase_url: string; pricing_url: string; manage_license_url: string };
+  website: { website_url: string; required_pages: Array<{ page_id: string; title: string; path: string; purpose: string }> };
+  update_announcement: { version: string; channel: string; title: string; body: string; announcement_url: string };
+  feedback: { feedback_url: string; support_email: string; subject_template: string };
+}
+
 interface DesktopState {
   vaultRoot: string;
   sourceApp: string;
@@ -169,6 +255,9 @@ interface DesktopState {
   events: LogEvent[];
   atoms: KnowledgeAtomDocument[];
   knowledge: KnowledgeLibraryView;
+  privacy: PrivacySecurityState;
+  release: ReleaseState;
+  commercial: CommercialState;
   logs: LogEvent[];
 }
 
@@ -203,6 +292,20 @@ interface DesktopApi {
   ensureObsidianCompatibility(): Promise<unknown>;
   backupKnowledge(): Promise<unknown>;
   restoreLatestKnowledgeBackup(): Promise<unknown>;
+  getPrivacyState(): Promise<PrivacySecurityState>;
+  savePrivacySettings(input: Partial<PrivacySecuritySettings>): Promise<PrivacySecurityState>;
+  scanSensitiveContent(input: { content: string }): Promise<SensitiveScanResult>;
+  applyRawRetention(): Promise<unknown>;
+  deleteSourceData(input: { source_app: string }): Promise<unknown>;
+  exportUserData(): Promise<unknown>;
+  deleteAllUserData(): Promise<unknown>;
+  writePrivacyLegalDrafts(): Promise<unknown>;
+  getReleaseState(): Promise<ReleaseState>;
+  checkForUpdates(): Promise<unknown>;
+  getCommercialState(): Promise<CommercialState>;
+  activateLicense(input: { activation_code: string }): Promise<unknown>;
+  saveCommercialAccount(input: { account_email: string }): Promise<unknown>;
+  createFeedbackDraft(input: { contact_email?: string; category: FeedbackCategory; message: string }): Promise<unknown>;
   listLogs(): Promise<LogEvent[]>;
   setConnectorEnabled(input: { sourceApp: string; enabled: boolean }): Promise<unknown>;
   getAutomationState(): Promise<DailyAutomationState>;
@@ -229,6 +332,8 @@ const navItems: Array<{ key: NavKey; label: string; icon: React.ComponentType<{ 
   { key: "import", label: "导入", icon: FileInput },
   { key: "run", label: "运行", icon: Play },
   { key: "library", label: "知识库", icon: BookOpenCheck },
+  { key: "privacy", label: "隐私", icon: Lock },
+  { key: "commercial", label: "商业", icon: BadgeCheck },
   { key: "pending", label: "待确认", icon: ListChecks },
   { key: "detail", label: "详情", icon: SquarePen },
   { key: "settings", label: "设置", icon: Settings },
@@ -290,6 +395,9 @@ function getDesktopApi(): DesktopApi {
     events: [sampleLog],
     atoms: [sampleAtom, duplicateAtom],
     knowledge: buildPreviewKnowledge([sampleAtom, duplicateAtom]),
+    privacy: buildPreviewPrivacy(),
+    release: buildPreviewRelease(),
+    commercial: buildPreviewCommercial(),
     logs: [sampleLog]
   };
 
@@ -345,6 +453,75 @@ function getDesktopApi(): DesktopApi {
     async restoreLatestKnowledgeBackup() {
       return { backup_dir: "data/backups/preview", restored_dir_count: 4 };
     },
+    async getPrivacyState() {
+      return previewState.privacy;
+    },
+    async savePrivacySettings(input) {
+      previewState.privacy = {
+        ...previewState.privacy,
+        settings: { ...previewState.privacy.settings, ...input, updated_at: new Date().toISOString() }
+      };
+      return previewState.privacy;
+    },
+    async scanSensitiveContent(input) {
+      const hit = input.content.includes("sk-") || input.content.includes("客户");
+      return {
+        sensitivity: hit ? "confidential" : "personal",
+        can_enter_personal_kb: !hit,
+        findings: hit ? [{ rule_id: "preview", label: "预览敏感内容", sensitivity: "confidential", severity: "high", match_preview: "prev***view" }] : []
+      };
+    },
+    async applyRawRetention() {
+      return { mode: previewState.privacy.settings.raw_retention_mode, deleted_paths: [] };
+    },
+    async deleteSourceData(input) {
+      return { source_app: input.source_app, deleted_paths: [`raw/imports/${input.source_app}`] };
+    },
+    async exportUserData() {
+      return { export_dir: "data/exports/preview", copied_dir_count: 4 };
+    },
+    async deleteAllUserData() {
+      return { deleted_paths: ["knowledge", "raw", "data/runtime"] };
+    },
+    async writePrivacyLegalDrafts() {
+      return { privacy_policy_path: "legal/隐私政策草案.md", terms_path: "legal/用户协议草案.md" };
+    },
+    async getReleaseState() {
+      return previewState.release;
+    },
+    async checkForUpdates() {
+      return { enabled: false, message: "预览模式未配置更新发布地址。" };
+    },
+    async getCommercialState() {
+      return previewState.commercial;
+    },
+    async activateLicense(input) {
+      previewState.commercial = {
+        ...previewState.commercial,
+        runtime: {
+          ...previewState.commercial.runtime,
+          license_status: input.activation_code ? "active" : "invalid",
+          plan_id: input.activation_code ? "pro" : "free",
+          license_id: input.activation_code ? "preview-license" : "",
+          updated_at: new Date().toISOString()
+        },
+        access: {
+          ...previewState.commercial.access,
+          effective_plan_id: input.activation_code ? "pro" : "free",
+          can_use_paid_features: Boolean(input.activation_code),
+          can_export_existing_data: true,
+          blocked_feature_ids: input.activation_code ? [] : ["daily_automation"]
+        }
+      };
+      return { ok: Boolean(input.activation_code), state: previewState.commercial };
+    },
+    async saveCommercialAccount(input) {
+      previewState.commercial.runtime.account_email = input.account_email;
+      return previewState.commercial;
+    },
+    async createFeedbackDraft() {
+      return { draft_path: "data/runtime/feedback-drafts/preview.json", feedback: previewState.commercial.feedback };
+    },
     async listLogs() {
       return previewState.logs;
     },
@@ -398,6 +575,110 @@ function getDesktopApi(): DesktopApi {
       previewState.apiKeyConfigured = Boolean(input.apiKey);
       return previewState;
     }
+  };
+}
+
+function buildPreviewCommercial(): CommercialState {
+  const now = new Date().toISOString();
+  return {
+    plans: [
+      { plan_id: "free", label: "Free", price_label: "免费", feature_ids: ["manual_import", "export_existing_data"], limits: { daily_runs: 1, connectors: 1, automation: false, export_existing_data: true } },
+      { plan_id: "trial", label: "Trial", price_label: "14 天试用", feature_ids: ["daily_automation", "all_connectors", "export_existing_data"], limits: { daily_runs: "unlimited", connectors: "unlimited", automation: true, export_existing_data: true } },
+      { plan_id: "pro", label: "Pro", price_label: "付费版", feature_ids: ["daily_automation", "all_connectors", "priority_updates", "export_existing_data"], limits: { daily_runs: "unlimited", connectors: "unlimited", automation: true, export_existing_data: true } }
+    ],
+    runtime: {
+      plan_id: "trial",
+      license_status: "trial_active",
+      trial_started_at: now,
+      trial_ends_at: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+      account_email: "",
+      license_id: "",
+      activated_at: "",
+      expires_at: "",
+      offline_valid_until: "",
+      updated_at: now
+    },
+    access: {
+      effective_plan_id: "trial",
+      can_use_paid_features: true,
+      can_export_existing_data: true,
+      blocked_feature_ids: [],
+      days_until_trial_end: 14,
+      days_until_license_expiry: 0
+    },
+    notices: [{ level: "info", title: "试用中", message: "试用还剩 14 天。" }],
+    purchase: {
+      purchase_url: "https://villweb.com/ai-chat-knowledge/pricing",
+      pricing_url: "https://villweb.com/ai-chat-knowledge/pricing",
+      manage_license_url: "https://villweb.com/ai-chat-knowledge/account"
+    },
+    website: {
+      website_url: "https://villweb.com/ai-chat-knowledge",
+      required_pages: [
+        { page_id: "home", title: "产品介绍", path: "/", purpose: "说明产品价值。" },
+        { page_id: "pricing", title: "价格页", path: "/pricing", purpose: "展示版本差异和购买入口。" },
+        { page_id: "support", title: "支持与反馈", path: "/support", purpose: "承接反馈。" }
+      ]
+    },
+    update_announcement: {
+      version: "0.1.0",
+      channel: "stable",
+      title: "首个本地优先桌面版本",
+      body: "包含核心沉淀流程、隐私安全和商业化入口。",
+      announcement_url: "https://villweb.com/ai-chat-knowledge/changelog"
+    },
+    feedback: {
+      feedback_url: "https://villweb.com/ai-chat-knowledge/support",
+      support_email: "support@villweb.com",
+      subject_template: "[AI Chat Knowledge] 反馈"
+    }
+  };
+}
+
+function buildPreviewRelease(): ReleaseState {
+  return {
+    app_name: "AI Chat Knowledge",
+    app_id: "com.villweb.aichatknowledge",
+    executable_name: "AI Chat Knowledge",
+    data_dir_name: "AI Chat Knowledge",
+    default_vault_dir_name: "vault",
+    update_channel: "stable",
+    update_url: "https://updates.villweb.com/ai-chat-knowledge-system",
+    update_url_env: "AI_KB_UPDATE_URL",
+    uninstall_policy: "retain_user_data",
+    version: "0.1.0",
+    is_packaged: false,
+    app_data_dir: "~/Library/Application Support/AI Chat Knowledge",
+    default_vault_root: "~/Library/Application Support/AI Chat Knowledge/vault",
+    update_enabled: false
+  };
+}
+
+function buildPreviewPrivacy(): PrivacySecurityState {
+  const now = new Date().toISOString();
+  return {
+    rules: [
+      { rule_id: "api_key", label: "API Key 或访问令牌", sensitivity: "confidential", severity: "high", description: "识别常见密钥和令牌格式。" },
+      { rule_id: "business_private", label: "公司、客户或合同内容", sensitivity: "confidential", severity: "high", description: "识别公司项目、客户资料、合同、报价、内部资料等内容。" }
+    ],
+    settings: {
+      require_source_authorization: true,
+      raw_retention_mode: "keep_forever",
+      raw_retention_days: 30,
+      allow_cloud_ai_for_private: false,
+      updated_at: now
+    },
+    sources: buildPreviewConnectors().map((connector) => ({
+      source_app: connector.source_app,
+      display_name: connector.display_name,
+      status: connector.status,
+      authorized: connector.status === "available" && connector.enabled,
+      permission_scope: connector.permission_scope,
+      reads: connector.reads,
+      does_not_read: connector.does_not_read,
+      import_path: connector.import_path
+    })),
+    secure_credentials: { openai_compatible_saved: false, updated_at: null }
   };
 }
 
@@ -505,6 +786,7 @@ function App() {
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  const [bootError, setBootError] = useState("");
 
   useEffect(() => {
     void refresh();
@@ -539,10 +821,20 @@ function App() {
   }, [state]);
 
   async function refresh() {
-    const nextState = await desktopApi.getState() as DesktopState;
-    setState(nextState);
-    if (!selectedId && nextState.atoms[0]) {
-      setSelectedId(nextState.atoms[0].atom.atom_id);
+    try {
+      const nextState = await desktopApi.getState() as DesktopState;
+      setBootError("");
+      setState(nextState);
+      if (!selectedId && nextState.atoms[0]) {
+        setSelectedId(nextState.atoms[0].atom.atom_id);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!state) {
+        setBootError(message);
+        return;
+      }
+      throw error;
     }
   }
 
@@ -561,7 +853,19 @@ function App() {
   }
 
   if (!state) {
-    return <div className="boot">正在加载本地知识库</div>;
+    return (
+      <div className="boot">
+        <div className="bootBox">
+          <strong>{bootError ? "本地知识库启动失败" : "正在加载本地知识库"}</strong>
+          {bootError && (
+            <>
+              <p>{bootError}</p>
+              <button className="primary" onClick={() => void refresh()}>重试</button>
+            </>
+          )}
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -636,9 +940,32 @@ function App() {
             onRestore={() => withBusy(() => desktopApi.restoreLatestKnowledgeBackup(), "最近备份已恢复")}
           />
         )}
+        {active === "privacy" && (
+          <PrivacyPanel
+            privacy={state.privacy}
+            connectors={state.connectors}
+            busy={busy}
+            onSaveSettings={(input) => withBusy(() => desktopApi.savePrivacySettings(input), "隐私和安全设置已保存")}
+            onScan={(content) => desktopApi.scanSensitiveContent({ content })}
+            onApplyRetention={() => withBusy(() => desktopApi.applyRawRetention(), "原始记录保留策略已执行")}
+            onDeleteSource={(sourceApp) => withBusy(() => desktopApi.deleteSourceData({ source_app: sourceApp }), "来源数据已删除")}
+            onExportUserData={() => withBusy(() => desktopApi.exportUserData(), "用户数据导出完成")}
+            onDeleteAllUserData={() => withBusy(() => desktopApi.deleteAllUserData(), "本地用户数据已删除")}
+            onWriteLegalDrafts={() => withBusy(() => desktopApi.writePrivacyLegalDrafts(), "隐私政策和用户协议草案已生成")}
+          />
+        )}
+        {active === "commercial" && (
+          <CommercialPanel
+            commercial={state.commercial}
+            busy={busy}
+            onActivate={(activationCode) => withBusy(() => desktopApi.activateLicense({ activation_code: activationCode }), "授权状态已更新")}
+            onSaveAccount={(accountEmail) => withBusy(() => desktopApi.saveCommercialAccount({ account_email: accountEmail }), "账号入口已保存")}
+            onCreateFeedback={(input) => withBusy(() => desktopApi.createFeedbackDraft(input), "反馈草稿已创建")}
+          />
+        )}
         {active === "pending" && <PendingPanel atoms={filteredAtoms} counts={counts} query={query} selectedId={selected?.atom.atom_id ?? ""} onQuery={setQuery} onSelect={(atomId) => { setSelectedId(atomId); setActive("detail"); }} />}
         {active === "detail" && selected && <DetailPanel document={selected} atoms={state.atoms} busy={busy} onUpdate={(input) => withBusy(() => desktopApi.updateAtom(input), "知识已更新")} />}
-        {active === "settings" && <SettingsPanel state={state} busy={busy} onSave={(input) => withBusy(() => desktopApi.saveSessionConfig(input), "会话配置已保存")} />}
+        {active === "settings" && <SettingsPanel state={state} busy={busy} onSave={(input) => withBusy(() => desktopApi.saveSessionConfig(input), "会话配置已保存")} onCheckUpdates={() => withBusy(() => desktopApi.checkForUpdates(), "更新检查完成")} />}
         {active === "logs" && <LogsPanel logs={[...state.events, ...state.logs]} />}
       </section>
     </main>
@@ -663,7 +990,7 @@ function GuidePanel({ state, counts }: { state: DesktopState; counts: Record<Rev
           <li><Check size={16} />知识库位置：{compactPath(state.vaultRoot)}</li>
           <li><Check size={16} />来源：{state.sourceApp}</li>
           <li><Shield size={16} />AI 服务：{state.aiProvider}</li>
-          <li><Shield size={16} />API Key：{state.apiKeyConfigured ? "当前会话已配置" : "未保存到磁盘"}</li>
+          <li><Shield size={16} />API Key：{state.apiKeyConfigured ? "已配置" : "未配置"}</li>
         </ul>
       </section>
     </div>
@@ -923,6 +1250,201 @@ function LibraryPanel({
   );
 }
 
+function PrivacyPanel({
+  privacy,
+  connectors,
+  busy,
+  onSaveSettings,
+  onScan,
+  onApplyRetention,
+  onDeleteSource,
+  onExportUserData,
+  onDeleteAllUserData,
+  onWriteLegalDrafts
+}: {
+  privacy: PrivacySecurityState;
+  connectors: SourceConnectorView[];
+  busy: boolean;
+  onSaveSettings: (input: Partial<PrivacySecuritySettings>) => void;
+  onScan: (content: string) => Promise<SensitiveScanResult>;
+  onApplyRetention: () => void;
+  onDeleteSource: (sourceApp: string) => void;
+  onExportUserData: () => void;
+  onDeleteAllUserData: () => void;
+  onWriteLegalDrafts: () => void;
+}) {
+  const [settings, setSettings] = useState(privacy.settings);
+  const [scanText, setScanText] = useState("客户合同里出现 api_key: sk-example-secret");
+  const [scanResult, setScanResult] = useState<SensitiveScanResult | null>(null);
+  const [sourceToDelete, setSourceToDelete] = useState(connectors[0]?.source_app ?? "codex");
+
+  useEffect(() => {
+    setSettings(privacy.settings);
+  }, [privacy.settings.updated_at]);
+
+  function updateSetting<K extends keyof PrivacySecuritySettings>(key: K, value: PrivacySecuritySettings[K]) {
+    setSettings((current) => ({ ...current, [key]: value }));
+  }
+
+  return (
+    <div className="privacyLayout">
+      <section className="panel">
+        <h2>隐私和安全设置</h2>
+        <div className="formGrid">
+          <label>来源授权<select value={settings.require_source_authorization ? "yes" : "no"} onChange={(event) => updateSetting("require_source_authorization", event.target.value === "yes")}><option value="yes">需要</option><option value="no">不需要</option></select></label>
+          <label>云端 AI 处理 private<select value={settings.allow_cloud_ai_for_private ? "yes" : "no"} onChange={(event) => updateSetting("allow_cloud_ai_for_private", event.target.value === "yes")}><option value="no">禁止</option><option value="yes">允许</option></select></label>
+          <label>原始记录保留<select value={settings.raw_retention_mode} onChange={(event) => updateSetting("raw_retention_mode", event.target.value as RawRetentionMode)}><option value="keep_forever">长期保留</option><option value="delete_after_days">按天数删除</option><option value="delete_after_successful_run">成功运行后删除</option></select></label>
+          <label>保留天数<input type="number" min="0" value={settings.raw_retention_days} onChange={(event) => updateSetting("raw_retention_days", Number(event.target.value))} /></label>
+        </div>
+        <div className="privacyActions">
+          <button className="primary" onClick={() => onSaveSettings(settings)} disabled={busy}><Shield size={16} />保存设置</button>
+          <button onClick={onApplyRetention} disabled={busy}><Trash2 size={16} />执行保留策略</button>
+          <button onClick={onWriteLegalDrafts} disabled={busy}><FileText size={16} />生成协议草案</button>
+        </div>
+        <div className="secureState"><KeyRound size={16} /><span>API Key：{privacy.secure_credentials.openai_compatible_saved ? `已加密保存 ${privacy.secure_credentials.updated_at ?? ""}` : "未保存到本地"}</span></div>
+      </section>
+
+      <section className="panel">
+        <h2>敏感内容扫描</h2>
+        <label className="fullField">待扫描文本<textarea value={scanText} onChange={(event) => setScanText(event.target.value)} /></label>
+        <button className="primary" onClick={() => void onScan(scanText).then(setScanResult)} disabled={busy}><Search size={16} />扫描</button>
+        {scanResult && <div className="scanResult"><strong>{scanResult.sensitivity} · {scanResult.can_enter_personal_kb ? "可进入个人库" : "默认阻断"}</strong>{scanResult.findings.map((finding, index) => <span key={`${finding.rule_id}-${index}`}>{finding.label} · {finding.severity} · {finding.match_preview}</span>)}{scanResult.findings.length === 0 && <span>未发现敏感规则命中</span>}</div>}
+      </section>
+
+      <section className="panel">
+        <h2>来源授权说明</h2>
+        <div className="sourceAuthList">{privacy.sources.map((source) => <div className="sourceAuthRow" key={source.source_app}><strong>{source.display_name} · {source.authorized ? "已授权" : "未授权"}</strong><span>{source.permission_scope}</span><small>读取：{source.reads.join("；")}</small><small>不读取：{source.does_not_read.join("；")}</small></div>)}</div>
+      </section>
+
+      <section className="panel">
+        <h2>用户数据</h2>
+        <div className="formGrid"><label>删除来源<select value={sourceToDelete} onChange={(event) => setSourceToDelete(event.target.value)}>{connectors.map((connector) => <option key={connector.source_app} value={connector.source_app}>{connector.display_name}</option>)}</select></label></div>
+        <div className="privacyActions">
+          <button onClick={() => onDeleteSource(sourceToDelete)} disabled={busy}><Trash2 size={16} />删除来源数据</button>
+          <button onClick={onExportUserData} disabled={busy}><Download size={16} />导出用户数据</button>
+          <button onClick={onDeleteAllUserData} disabled={busy}><Trash2 size={16} />彻底删除本地数据</button>
+        </div>
+      </section>
+
+      <section className="panel">
+        <h2>隐私分级规则</h2>
+        <div className="ruleList">{privacy.rules.map((rule) => <div className="ruleRow" key={rule.rule_id}><strong>{rule.label}</strong><span>{rule.sensitivity} · {rule.severity}</span><small>{rule.description}</small></div>)}</div>
+      </section>
+    </div>
+  );
+}
+
+function CommercialPanel({
+  commercial,
+  busy,
+  onActivate,
+  onSaveAccount,
+  onCreateFeedback
+}: {
+  commercial: CommercialState;
+  busy: boolean;
+  onActivate: (activationCode: string) => void;
+  onSaveAccount: (accountEmail: string) => void;
+  onCreateFeedback: (input: { contact_email?: string; category: FeedbackCategory; message: string }) => void;
+}) {
+  const [activationCode, setActivationCode] = useState("");
+  const [accountEmail, setAccountEmail] = useState(commercial.runtime.account_email);
+  const [feedbackCategory, setFeedbackCategory] = useState<FeedbackCategory>("feature");
+  const [feedbackEmail, setFeedbackEmail] = useState(commercial.runtime.account_email);
+  const [feedbackMessage, setFeedbackMessage] = useState("");
+
+  useEffect(() => {
+    setAccountEmail(commercial.runtime.account_email);
+    setFeedbackEmail(commercial.runtime.account_email);
+  }, [commercial.runtime.account_email]);
+
+  return (
+    <div className="commercialLayout">
+      <section className="panel commercialHero">
+        <h2>授权状态</h2>
+        <div className="commercialStatus">
+          <BadgeCheck size={22} />
+          <div>
+            <strong>{commercial.runtime.license_status}</strong>
+            <span>{commercial.access.effective_plan_id} · {commercial.access.can_use_paid_features ? "付费功能可用" : "付费功能锁定"}</span>
+          </div>
+        </div>
+        <div className="statusPills">
+          <span>试用剩余 {Math.max(commercial.access.days_until_trial_end, 0)} 天</span>
+          <span>导出已有数据：{commercial.access.can_export_existing_data ? "允许" : "限制"}</span>
+          <span>离线有效至：{commercial.runtime.offline_valid_until || "未激活"}</span>
+        </div>
+        {commercial.notices.map((notice) => (
+          <div className={`commercialNotice ${notice.level}`} key={`${notice.title}-${notice.message}`}>
+            <strong>{notice.title}</strong>
+            <span>{notice.message}</span>
+          </div>
+        ))}
+      </section>
+
+      <section className="panel">
+        <h2>版本差异</h2>
+        <div className="planGrid">
+          {commercial.plans.map((plan) => (
+            <div className="planCard" key={plan.plan_id}>
+              <strong>{plan.label}</strong>
+              <span>{plan.price_label}</span>
+              <small>每日运行：{plan.limits.daily_runs}</small>
+              <small>来源数量：{plan.limits.connectors}</small>
+              <small>自动化：{plan.limits.automation ? "支持" : "不支持"}</small>
+              <small>已有数据导出：{plan.limits.export_existing_data ? "支持" : "不支持"}</small>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel">
+        <h2>激活和账号</h2>
+        <label className="fullField">激活码<textarea value={activationCode} onChange={(event) => setActivationCode(event.target.value)} placeholder="AIKB1..." /></label>
+        <div className="commercialActions">
+          <button className="primary" onClick={() => onActivate(activationCode)} disabled={busy || !activationCode.trim()}><BadgeCheck size={16} />激活授权</button>
+        </div>
+        <label>账号邮箱<input value={accountEmail} onChange={(event) => setAccountEmail(event.target.value)} placeholder="you@example.com" /></label>
+        <div className="commercialActions">
+          <button onClick={() => onSaveAccount(accountEmail)} disabled={busy || !accountEmail.trim()}><KeyRound size={16} />保存账号入口</button>
+        </div>
+      </section>
+
+      <section className="panel">
+        <h2>购买和官网</h2>
+        <div className="commercialLinkList">
+          <a href={commercial.purchase.purchase_url} target="_blank" rel="noreferrer"><ShoppingCart size={16} />购买入口</a>
+          <a href={commercial.purchase.manage_license_url} target="_blank" rel="noreferrer"><KeyRound size={16} />授权管理</a>
+          <a href={commercial.website.website_url} target="_blank" rel="noreferrer"><Globe size={16} />官网</a>
+          <a href={commercial.update_announcement.announcement_url} target="_blank" rel="noreferrer"><Megaphone size={16} />更新公告</a>
+        </div>
+        <div className="websiteList">
+          {commercial.website.required_pages.map((page) => (
+            <div className="websiteRow" key={page.page_id}>
+              <strong>{page.title}</strong>
+              <span>{page.path}</span>
+              <small>{page.purpose}</small>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel">
+        <h2>反馈入口</h2>
+        <div className="formGrid">
+          <label>类型<select value={feedbackCategory} onChange={(event) => setFeedbackCategory(event.target.value as FeedbackCategory)}><option value="feature">功能建议</option><option value="bug">问题反馈</option><option value="billing">账单授权</option><option value="other">其他</option></select></label>
+          <label>邮箱<input value={feedbackEmail} onChange={(event) => setFeedbackEmail(event.target.value)} placeholder="you@example.com" /></label>
+        </div>
+        <label className="fullField">内容<textarea value={feedbackMessage} onChange={(event) => setFeedbackMessage(event.target.value)} placeholder="写下问题、建议或购买相关反馈" /></label>
+        <div className="commercialActions">
+          <button className="primary" onClick={() => onCreateFeedback({ category: feedbackCategory, contact_email: feedbackEmail, message: feedbackMessage })} disabled={busy || !feedbackMessage.trim()}><FileText size={16} />创建反馈草稿</button>
+          <a href={commercial.feedback.feedback_url} target="_blank" rel="noreferrer"><Globe size={16} />在线支持</a>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function PendingPanel({ atoms, counts, query, selectedId, onQuery, onSelect }: { atoms: KnowledgeAtomDocument[]; counts: Record<ReviewStatus, number>; query: string; selectedId: string; onQuery: (value: string) => void; onSelect: (atomId: string) => void }) {
   return (
     <section className="panel fill">
@@ -992,7 +1514,17 @@ function DetailPanel({ document, atoms, busy, onUpdate }: { document: KnowledgeA
   );
 }
 
-function SettingsPanel({ state, busy, onSave }: { state: DesktopState; busy: boolean; onSave: (input: SessionConfigInput) => void }) {
+function SettingsPanel({
+  state,
+  busy,
+  onSave,
+  onCheckUpdates
+}: {
+  state: DesktopState;
+  busy: boolean;
+  onSave: (input: SessionConfigInput) => void;
+  onCheckUpdates: () => void;
+}) {
   const [sourceApp, setSourceApp] = useState(state.sourceApp);
   const [aiProvider, setAiProvider] = useState(state.aiProvider);
   const [baseUrl, setBaseUrl] = useState("");
@@ -1000,17 +1532,35 @@ function SettingsPanel({ state, busy, onSave }: { state: DesktopState; busy: boo
   const [apiKey, setApiKey] = useState("");
 
   return (
-    <section className="panel settingsPanel">
-      <h2>设置</h2>
-      <div className="formGrid">
-        <label>默认来源<select value={sourceApp} onChange={(event) => setSourceApp(event.target.value)}>{state.connectors.filter((connector) => connector.status === "available" && connector.enabled).map((connector) => <option key={connector.source_app} value={connector.source_app}>{connector.display_name}</option>)}</select></label>
-        <label>AI 服务<select value={aiProvider} onChange={(event) => setAiProvider(event.target.value)}><option value="fixture">fixture</option><option value="openai-compatible">openai-compatible</option></select></label>
-        <label>Base URL<input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://api.example.com/v1" /></label>
-        <label>模型<input value={model} onChange={(event) => setModel(event.target.value)} placeholder="model-name" /></label>
-        <label>API Key<input value={apiKey} onChange={(event) => setApiKey(event.target.value)} type="password" placeholder="仅当前会话" /></label>
-      </div>
-      <button className="primary" onClick={() => onSave({ sourceApp, aiProvider, baseUrl, model, apiKey })} disabled={busy}><Shield size={17} /><span>保存会话配置</span></button>
-    </section>
+    <div className="grid two">
+      <section className="panel settingsPanel">
+        <h2>设置</h2>
+        <div className="formGrid">
+          <label>默认来源<select value={sourceApp} onChange={(event) => setSourceApp(event.target.value)}>{state.connectors.filter((connector) => connector.status === "available" && connector.enabled).map((connector) => <option key={connector.source_app} value={connector.source_app}>{connector.display_name}</option>)}</select></label>
+          <label>AI 服务<select value={aiProvider} onChange={(event) => setAiProvider(event.target.value)}><option value="fixture">fixture</option><option value="openai-compatible">openai-compatible</option></select></label>
+          <label>Base URL<input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://api.example.com/v1" /></label>
+          <label>模型<input value={model} onChange={(event) => setModel(event.target.value)} placeholder="model-name" /></label>
+          <label>API Key<input value={apiKey} onChange={(event) => setApiKey(event.target.value)} type="password" placeholder="本地加密保存" /></label>
+        </div>
+        <button className="primary" onClick={() => onSave({ sourceApp, aiProvider, baseUrl, model, apiKey })} disabled={busy}><Shield size={17} /><span>保存会话配置</span></button>
+      </section>
+
+      <section className="panel releasePanel">
+        <h2>发布状态</h2>
+        <div className="releaseGrid">
+          <span>应用</span><strong>{state.release.app_name}</strong>
+          <span>版本</span><strong>{state.release.version}</strong>
+          <span>包名</span><strong>{state.release.app_id}</strong>
+          <span>运行</span><strong>{state.release.is_packaged ? "安装包" : "开发预览"}</strong>
+          <span>数据目录</span><strong>{compactPath(state.release.app_data_dir)}</strong>
+          <span>默认 vault</span><strong>{compactPath(state.release.default_vault_root)}</strong>
+          <span>更新通道</span><strong>{state.release.update_channel}</strong>
+          <span>更新地址</span><strong>{state.release.update_url}</strong>
+          <span>卸载策略</span><strong>{state.release.uninstall_policy === "retain_user_data" ? "保留用户数据" : state.release.uninstall_policy}</strong>
+        </div>
+        <button className="secondary" onClick={onCheckUpdates} disabled={busy || !state.release.update_enabled}><PackageCheck size={17} /><span>检查更新</span></button>
+      </section>
+    </div>
   );
 }
 
@@ -1053,6 +1603,8 @@ function subtitleFor(active: NavKey): string {
     import: "手动导入本地导出文件",
     run: "执行每日沉淀流程",
     library: "搜索、筛选、合并、日历和导出",
+    privacy: "来源授权、敏感识别、数据导出和删除",
+    commercial: "试用、授权、购买、更新公告和反馈",
     pending: "审查候选知识原子",
     detail: "编辑、批准、拒绝或合并",
     settings: "AI 服务和本地配置",
