@@ -23,6 +23,7 @@ files:
 
 asar: true
 asarUnpack:
+  - package.json
   - app/**/*
   - scripts/**/*
   - prompts/**/*
@@ -31,8 +32,10 @@ asarUnpack:
   - node_modules/file-uri-to-path/**/*
   - node_modules/tsx/**/*
   - node_modules/esbuild/**/*
+  - node_modules/@esbuild/**/*
   - node_modules/get-tsconfig/**/*
   - node_modules/resolve-pkg-maps/**/*
+  - node_modules/yaml/**/*
 
 npmRebuild: true
 buildDependenciesFromSource: true

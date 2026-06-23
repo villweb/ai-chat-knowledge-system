@@ -786,6 +786,7 @@ function App() {
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  const [bootError, setBootError] = useState("");
 
   useEffect(() => {
     void refresh();
@@ -820,10 +821,20 @@ function App() {
   }, [state]);
 
   async function refresh() {
-    const nextState = await desktopApi.getState() as DesktopState;
-    setState(nextState);
-    if (!selectedId && nextState.atoms[0]) {
-      setSelectedId(nextState.atoms[0].atom.atom_id);
+    try {
+      const nextState = await desktopApi.getState() as DesktopState;
+      setBootError("");
+      setState(nextState);
+      if (!selectedId && nextState.atoms[0]) {
+        setSelectedId(nextState.atoms[0].atom.atom_id);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!state) {
+        setBootError(message);
+        return;
+      }
+      throw error;
     }
   }
 
@@ -842,7 +853,19 @@ function App() {
   }
 
   if (!state) {
-    return <div className="boot">正在加载本地知识库</div>;
+    return (
+      <div className="boot">
+        <div className="bootBox">
+          <strong>{bootError ? "本地知识库启动失败" : "正在加载本地知识库"}</strong>
+          {bootError && (
+            <>
+              <p>{bootError}</p>
+              <button className="primary" onClick={() => void refresh()}>重试</button>
+            </>
+          )}
+        </div>
+      </div>
+    );
   }
 
   return (

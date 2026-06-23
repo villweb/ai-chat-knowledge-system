@@ -59,7 +59,10 @@ test("P8 electron-builder config keeps app resources and user data boundaries", 
   assert.equal(config.appId, RELEASE_IDENTITY.app_id);
   assert.equal(config.productName, RELEASE_IDENTITY.app_name);
   assert.equal(config.asar, true);
+  assert.equal(config.asarUnpack.includes("package.json"), true);
   assert.equal(config.asarUnpack.includes("node_modules/better-sqlite3/**/*"), true);
+  assert.equal(config.asarUnpack.includes("node_modules/@esbuild/**/*"), true);
+  assert.equal(config.asarUnpack.includes("node_modules/yaml/**/*"), true);
   assert.equal(config.files.includes("!spec/**/*"), true);
   assert.equal(config.files.includes("!data/**/*"), true);
   assert.deepEqual(config.mac.target, ["dmg", "zip"]);
