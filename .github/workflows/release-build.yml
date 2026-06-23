@@ -6,6 +6,9 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build ${{ matrix.platform }}
@@ -43,10 +46,34 @@ jobs:
       - name: Quality gate
         run: npm run quality:gate
 
+      - name: Launch readiness report
+        run: npm run launch:readiness
+        env:
+          AI_KB_UPDATE_URL: ${{ vars.AI_KB_UPDATE_URL }}
+          AI_KB_LICENSE_PUBLIC_KEY: ${{ secrets.AI_KB_LICENSE_PUBLIC_KEY }}
+          AI_KB_LICENSE_SERVER_URL: ${{ vars.AI_KB_LICENSE_SERVER_URL }}
+          AI_KB_PAYMENT_URL: ${{ vars.AI_KB_PAYMENT_URL }}
+          AI_KB_ACCOUNT_URL: ${{ vars.AI_KB_ACCOUNT_URL }}
+          AI_KB_FEEDBACK_URL: ${{ vars.AI_KB_FEEDBACK_URL }}
+          AI_KB_SUPPORT_EMAIL: ${{ vars.AI_KB_SUPPORT_EMAIL }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+
       - name: Build installer
         run: npm run ${{ matrix.script }}
         env:
           AI_KB_UPDATE_URL: ${{ vars.AI_KB_UPDATE_URL }}
+          AI_KB_LICENSE_PUBLIC_KEY: ${{ secrets.AI_KB_LICENSE_PUBLIC_KEY }}
+          AI_KB_LICENSE_SERVER_URL: ${{ vars.AI_KB_LICENSE_SERVER_URL }}
+          AI_KB_PAYMENT_URL: ${{ vars.AI_KB_PAYMENT_URL }}
+          AI_KB_ACCOUNT_URL: ${{ vars.AI_KB_ACCOUNT_URL }}
+          AI_KB_FEEDBACK_URL: ${{ vars.AI_KB_FEEDBACK_URL }}
+          AI_KB_SUPPORT_EMAIL: ${{ vars.AI_KB_SUPPORT_EMAIL }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -66,3 +93,26 @@ jobs:
             release/*.blockmap
             release/*.yml
           if-no-files-found: error
+
+  publish:
+    name: Publish draft release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: |
+            release-artifacts/*.dmg
+            release-artifacts/*.zip
+            release-artifacts/*.exe
+            release-artifacts/*.blockmap
+            release-artifacts/*.yml

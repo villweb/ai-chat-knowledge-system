@@ -21,6 +21,7 @@ AI Chat Knowledge System 是一个本地优先的 AI 对话知识沉淀系统。
 - 支持 macOS DMG/ZIP、Windows NSIS/portable 安装包配置、发布通道和应用更新检查入口。
 - 支持 Free/Trial/Pro 商业状态、离线授权、购买入口、官网需求、更新公告和反馈入口。
 - 支持上线前质量闸门，自动检查首次启动、无 API Key、异常导入、模型失败、重复运行、隐私导出删除和发布配置。
+- 支持发布就绪检查，识别签名证书、更新服务器、授权服务、支付账号和反馈入口配置状态。
 
 ## 数据和隐私边界
 
@@ -115,6 +116,12 @@ npm run desktop:dist:win
 
 ```bash
 npm run quality:gate
+```
+
+检查真实发布外部配置：
+
+```bash
+npm run launch:readiness
 ```
 
 ## 常用命令
