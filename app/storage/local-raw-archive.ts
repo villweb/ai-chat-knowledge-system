@@ -3,16 +3,18 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { RawSourceDocument } from "../connectors";
 import type { VaultRelativePath } from "../schemas";
-import type { RawArchiveRef } from "./storage-provider";
+import type { RawArchiveRef, StorageProvider } from "./storage-provider";
 
 export interface LocalRawArchiveOptions {
   vault_root: string;
 }
 
-export class LocalRawArchive {
+export type RawArchiveProvider = Pick<StorageProvider, "archiveRawDocument">;
+
+export class LocalRawArchive implements RawArchiveProvider {
   constructor(private readonly options: LocalRawArchiveOptions) {}
 
-  async archive(document: RawSourceDocument): Promise<RawArchiveRef> {
+  async archiveRawDocument(document: RawSourceDocument): Promise<RawArchiveRef> {
     const absolutePath = resolveVaultPath(this.options.vault_root, document.raw_path);
     await mkdir(path.dirname(absolutePath), { recursive: true });
     await writeFile(absolutePath, document.content, "utf8");
@@ -21,6 +23,10 @@ export class LocalRawArchive {
       raw_path: document.raw_path,
       checksum: sha256(document.content)
     };
+  }
+
+  async archive(document: RawSourceDocument): Promise<RawArchiveRef> {
+    return this.archiveRawDocument(document);
   }
 }
 

@@ -5,7 +5,8 @@
   "type": "module",
   "description": "Local-first core for turning AI chat records into reviewable knowledge atoms.",
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "p1:codex-import": "tsx scripts/run-manual-import-normalization.ts --source-app codex"
   },
   "engines": {
     "node": ">=22"
@@ -13,6 +14,7 @@
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^26.0.0",
+    "tsx": "^4.22.4",
     "typescript": "^6.0.2"
   },
   "dependencies": {
