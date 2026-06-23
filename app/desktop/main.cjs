@@ -289,7 +289,11 @@ function registerIpc() {
       throw new Error(result.stderr || "知识状态更新失败。");
     }
     pushEvent("atom_updated", "知识状态已更新。");
-    return JSON.parse(result.stdout);
+    const updated = JSON.parse(result.stdout);
+    // 审查后立即返回最新列表，避免 UI 使用陈旧 atoms / knowledge 视图
+    const atoms = await listAtoms();
+    const knowledge = await getKnowledgeView({});
+    return { ...updated, atoms, knowledge };
   });
 
   ipcMain.handle("knowledge:view", async (_event, input) => {

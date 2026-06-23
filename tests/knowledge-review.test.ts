@@ -51,6 +51,34 @@ test("批准知识原子会移动文件并清理重复副本", async () => {
   assert.equal(index[0]?.review_status, "approved");
 });
 
+test("拒绝知识原子会移动到 rejected 目录并同步索引", async () => {
+  const vaultRoot = await createTempVault();
+  const atom = buildAtom({
+    atom_id: "atom_review_reject",
+    title: "待拒绝知识",
+    review_status: "pending"
+  });
+  const inboxDocument = buildKnowledgeAtomMarkdownDocument(atom);
+  await writeAtomFile(vaultRoot, inboxDocument);
+
+  const result = await updateKnowledgeAtomReview({
+    vault_root: vaultRoot,
+    atom_id: atom.atom_id,
+    review_status: "rejected"
+  });
+
+  assert.equal(result.atom.review_status, "rejected");
+  assert.match(result.file_path, /^knowledge\/rejected\//);
+
+  const listed = await listKnowledgeAtomDocuments(vaultRoot);
+  assert.equal(listed.length, 1);
+  assert.equal(listed[0]?.atom.review_status, "rejected");
+
+  const index = JSON.parse(await readFile(path.join(vaultRoot, "data/runtime/knowledge-atoms-index.json"), "utf8")) as KnowledgeAtom[];
+  assert.equal(index.length, 1);
+  assert.equal(index[0]?.review_status, "rejected");
+});
+
 test("列表读取会按 atom_id 去重并优先保留目录与状态一致的副本", () => {
   const atom = buildAtom({
     atom_id: "atom_dedupe",

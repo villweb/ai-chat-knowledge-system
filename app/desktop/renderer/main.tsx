@@ -954,37 +954,67 @@ function App() {
     return message;
   }
 
+  async function applyReviewNavigation(
+    reviewedAtomId: string,
+    pendingBefore: string[],
+    nextAtoms: KnowledgeAtomDocument[],
+    reviewStatus?: ReviewStatus
+  ) {
+    const freshPending = nextAtoms
+      .filter((item) => item.atom.review_status === "pending")
+      .map((item) => item.atom.atom_id);
+    const reviewLabel = reviewStatusLabel(reviewStatus);
+    const currentPendingIndex = pendingBefore.indexOf(reviewedAtomId);
+
+    if (freshPending.length > 0) {
+      const nextPendingId = freshPending[currentPendingIndex] ?? freshPending[currentPendingIndex - 1] ?? freshPending[0]!;
+      setSelectedId(nextPendingId);
+      setActive("detail");
+      setNotice(`${reviewLabel}，继续下一条待确认（剩余 ${freshPending.length} 条）。`);
+      return;
+    }
+
+    setSelectedId("");
+    setActive("pending");
+    setNotice(`${reviewLabel}，全部待确认已处理完毕。`);
+  }
+
   async function handleAtomReview(input: AtomUpdateInput) {
     setBusy(true);
     setNotice("");
     setNoticeKind("info");
     const reviewedAtomId = input.atom_id;
-    const pendingIdsBefore = (state?.atoms ?? [])
+    const pendingBefore = (state?.atoms ?? [])
       .filter((item) => item.atom.review_status === "pending")
       .map((item) => item.atom.atom_id);
-    const currentPendingIndex = pendingIdsBefore.indexOf(reviewedAtomId);
 
     try {
-      await desktopApi.updateAtom(input);
+      const updateResult = await desktopApi.updateAtom(input) as KnowledgeAtomDocument & {
+        atoms?: KnowledgeAtomDocument[];
+        knowledge?: KnowledgeLibraryView;
+      };
       setImportBatchAtomIds((previous) => previous.filter((id) => id !== reviewedAtomId));
-      const nextState = await desktopApi.getState() as DesktopState;
-      setState(nextState);
 
-      const freshPending = nextState.atoms
-        .filter((item) => item.atom.review_status === "pending")
-        .map((item) => item.atom.atom_id);
-      const reviewLabel = reviewStatusLabel(input.review_status);
+      const nextAtoms = updateResult.atoms ?? (await desktopApi.listAtoms());
+      const nextKnowledge = updateResult.knowledge ?? (state?.knowledge ?? {
+        items: [],
+        facets: { source_apps: [], types: [], projects: [], tags: [], statuses: [] },
+        duplicate_groups: [],
+        calendar: []
+      });
+      setState((previous) => {
+        if (!previous) {
+          return previous;
+        }
 
-      if (freshPending.length > 0) {
-        const nextPendingId = freshPending[Math.min(Math.max(currentPendingIndex, 0), freshPending.length - 1)] ?? freshPending[0]!;
-        setSelectedId(nextPendingId);
-        setActive("detail");
-        setNotice(`${reviewLabel}，继续下一条待确认（剩余 ${freshPending.length} 条）。`);
-      } else {
-        setSelectedId("");
-        setActive("pending");
-        setNotice(`${reviewLabel}，全部待确认已处理完毕。`);
-      }
+        return {
+          ...previous,
+          atoms: nextAtoms,
+          knowledge: nextKnowledge
+        };
+      });
+
+      await applyReviewNavigation(reviewedAtomId, pendingBefore, nextAtoms, input.review_status);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
       setNoticeKind("error");
