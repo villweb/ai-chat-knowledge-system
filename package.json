@@ -5,6 +5,7 @@
   "type": "module",
   "description": "Local-first core for turning AI chat records into reviewable knowledge atoms.",
   "scripts": {
+    "postinstall": "npm rebuild better-sqlite3",
     "typecheck": "tsc --noEmit",
     "p1:codex-import": "tsx scripts/run-manual-import-normalization.ts --source-app codex"
   },

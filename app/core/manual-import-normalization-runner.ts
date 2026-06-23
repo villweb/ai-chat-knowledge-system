@@ -1,12 +1,20 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { ManualImportConnector } from "../connectors";
 import { LocalRunLogger } from "../services";
 import {
+  buildKnowledgeAtomMarkdownDocument,
   ensureWorkspaceDirectories,
+  KnowledgeAtomMarkdownWriter,
   LocalRawArchive,
   SQLiteNormalizedRecordStore
 } from "../storage";
-import type { SourceApp, VaultRelativePath } from "../schemas";
+import {
+  SCHEMA_VERSION,
+  type KnowledgeAtom,
+  type NormalizedRecord,
+  type SourceApp,
+  type VaultRelativePath
+} from "../schemas";
 import type { WorkspacePaths } from "../storage";
 import { normalizeManualImport } from "./normalize-manual-import";
 
@@ -30,6 +38,7 @@ export interface ManualImportNormalizationSummary {
   source_app: SourceApp;
   imported_file_count: number;
   normalized_record_count: number;
+  generated_atom_count: number;
   failed_file_count: number;
   failures: ManualImportNormalizationFailure[];
 }
@@ -42,6 +51,7 @@ export async function runManualImportNormalization(
   const logger = new LocalRunLogger({ vault_root: input.vault_root, logs_dir: paths.logs_dir });
   const connector = new ManualImportConnector(input.source_app);
   const archive = new LocalRawArchive({ vault_root: input.vault_root });
+  const knowledgeWriter = new KnowledgeAtomMarkdownWriter({ vault_root: input.vault_root });
   const normalizedStore = new SQLiteNormalizedRecordStore({
     vault_root: input.vault_root,
     sqlite_path: paths.sqlite_path
@@ -52,6 +62,7 @@ export async function runManualImportNormalization(
     source_app: input.source_app,
     imported_file_count: 0,
     normalized_record_count: 0,
+    generated_atom_count: 0,
     failed_file_count: 0,
     failures: []
   };
@@ -81,13 +92,19 @@ export async function runManualImportNormalization(
         const records = normalizeManualImport(document);
         await normalizedStore.saveNormalizedRecords(records);
 
+        const atoms = records.filter((record) => record.can_enter_personal_kb).map(buildP1PendingKnowledgeAtom);
+        for (const atom of atoms) {
+          await knowledgeWriter.writeKnowledgeAtom(buildKnowledgeAtomMarkdownDocument(atom));
+        }
+
         summary.imported_file_count += 1;
         summary.normalized_record_count += records.length;
+        summary.generated_atom_count += atoms.length;
 
         await logger.info({
           run_id: runId,
           event_type: "manual_import_file_completed",
-          message: `Manual import normalized ${records.length} record(s).`,
+          message: `Manual import normalized ${records.length} record(s) and wrote ${atoms.length} pending atom(s).`,
           source_app: input.source_app,
           raw_path: candidate.raw_path,
           record_count: records.length
@@ -113,7 +130,7 @@ export async function runManualImportNormalization(
     await logger.info({
       run_id: runId,
       event_type: "manual_import_completed",
-      message: `Manual import completed: ${summary.imported_file_count} file(s), ${summary.normalized_record_count} record(s), ${summary.failed_file_count} failure(s).`,
+      message: `Manual import completed: ${summary.imported_file_count} file(s), ${summary.normalized_record_count} record(s), ${summary.generated_atom_count} pending atom(s), ${summary.failed_file_count} failure(s).`,
       source_app: input.source_app,
       record_count: summary.normalized_record_count
     });
@@ -132,6 +149,57 @@ function buildWorkspacePaths(input: ManualImportNormalizationInput): WorkspacePa
     knowledge_dir: input.knowledge_dir ?? "knowledge",
     logs_dir: input.logs_dir ?? "logs"
   };
+}
+
+function buildP1PendingKnowledgeAtom(record: NormalizedRecord): KnowledgeAtom {
+  const createdAt = record.message_time === "unknown" ? record.created_at : record.message_time;
+  const evidence = truncateText(record.user_message, 120);
+
+  return {
+    schema_version: SCHEMA_VERSION.knowledgeAtom,
+    atom_id: createAtomId(record),
+    title: buildPendingAtomTitle(record),
+    type: "素材",
+    content: [
+      "这是一条 P1 固定示例候选卡片，用于验证导入记录能够进入待确认区。",
+      "",
+      `待确认素材：用户在「${record.topic}」中提出了一条需要人工判断是否沉淀的对话内容。`,
+      "",
+      "后续 P2 会由 AI 根据完整上下文提炼真实观点、方法、经验或问题。"
+    ].join("\n"),
+    source_app: record.source_app,
+    source_record_ids: [record.record_id],
+    source_raw_paths: [record.raw_path],
+    project: record.project,
+    tags: ["P1验证", "AI对话"],
+    sensitivity: record.sensitivity,
+    review_status: "pending",
+    evidence,
+    merged_into: "",
+    created_at: createdAt,
+    updated_at: record.updated_at
+  };
+}
+
+function createAtomId(record: NormalizedRecord): string {
+  return `atom_${createHash("sha256").update(record.record_id).digest("hex").slice(0, 24)}`;
+}
+
+function buildPendingAtomTitle(record: NormalizedRecord): string {
+  if (record.topic !== "unknown") {
+    return `待确认：${record.topic}`;
+  }
+
+  return `待确认：${truncateText(record.user_message, 24)}`;
+}
+
+function truncateText(value: string, maxLength: number): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, maxLength - 3)}...`;
 }
 
 function toErrorMessage(error: unknown): string {
