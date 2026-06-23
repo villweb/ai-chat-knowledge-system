@@ -3,10 +3,7 @@ import { ManualImportConnector } from "../connectors";
 import { LocalRunLogger } from "../services";
 import {
   buildKnowledgeAtomMarkdownDocument,
-  ensureWorkspaceDirectories,
-  KnowledgeAtomMarkdownWriter,
-  LocalRawArchive,
-  SQLiteNormalizedRecordStore
+  LocalStorageProvider
 } from "../storage";
 import {
   SCHEMA_VERSION,
@@ -48,14 +45,16 @@ export async function runManualImportNormalization(
 ): Promise<ManualImportNormalizationSummary> {
   const paths = buildWorkspacePaths(input);
   const runId = input.run_id ?? `run_${new Date().toISOString().replace(/[:.]/g, "-")}_${randomUUID()}`;
+  const startedAt = new Date().toISOString();
   const logger = new LocalRunLogger({ vault_root: input.vault_root, logs_dir: paths.logs_dir });
   const connector = new ManualImportConnector(input.source_app);
-  const archive = new LocalRawArchive({ vault_root: input.vault_root });
-  const knowledgeWriter = new KnowledgeAtomMarkdownWriter({ vault_root: input.vault_root });
-  const normalizedStore = new SQLiteNormalizedRecordStore({
+  const storage = new LocalStorageProvider({
     vault_root: input.vault_root,
     sqlite_path: paths.sqlite_path
   });
+  const importedRawPaths: VaultRelativePath[] = [];
+  const normalizedRecordIds: string[] = [];
+  const generatedAtomIds: string[] = [];
 
   const summary: ManualImportNormalizationSummary = {
     run_id: runId,
@@ -68,7 +67,7 @@ export async function runManualImportNormalization(
   };
 
   try {
-    await ensureWorkspaceDirectories(paths);
+    await storage.ensureWorkspace(paths);
     await logger.info({
       run_id: runId,
       event_type: "manual_import_started",
@@ -87,19 +86,26 @@ export async function runManualImportNormalization(
           vault_root: input.vault_root,
           candidate
         });
-        await archive.archiveRawDocument(document);
+        const archiveRef = await storage.archiveRawDocument(document);
 
-        const records = normalizeManualImport(document);
-        await normalizedStore.saveNormalizedRecords(records);
+        const records = normalizeManualImport(document).map((record) => ({
+          ...record,
+          raw_archive_path: archiveRef.archived_path,
+          raw_checksum: archiveRef.checksum
+        }));
+        await storage.saveNormalizedRecords(records);
 
         const atoms = records.filter((record) => record.can_enter_personal_kb).map(buildP1PendingKnowledgeAtom);
         for (const atom of atoms) {
-          await knowledgeWriter.writeKnowledgeAtom(buildKnowledgeAtomMarkdownDocument(atom));
+          await storage.writeKnowledgeAtom(buildKnowledgeAtomMarkdownDocument(atom));
         }
 
         summary.imported_file_count += 1;
         summary.normalized_record_count += records.length;
         summary.generated_atom_count += atoms.length;
+        importedRawPaths.push(archiveRef.archived_path);
+        normalizedRecordIds.push(...records.map((record) => record.record_id));
+        generatedAtomIds.push(...atoms.map((atom) => atom.atom_id));
 
         await logger.info({
           run_id: runId,
@@ -127,6 +133,28 @@ export async function runManualImportNormalization(
       }
     }
 
+    const finishedAt = new Date().toISOString();
+    await storage.saveDailyRun({
+      schema_version: SCHEMA_VERSION.dailyRun,
+      run_id: runId,
+      run_date: finishedAt.slice(0, 10),
+      status: summary.failed_file_count > 0 ? "failed" : "completed",
+      started_at: startedAt,
+      finished_at: finishedAt,
+      source_apps: [input.source_app],
+      imported_raw_paths: importedRawPaths,
+      normalized_record_ids: normalizedRecordIds,
+      generated_atom_ids: generatedAtomIds,
+      errors: summary.failures.map((failure) => ({
+        code: "manual_import_file_failed",
+        message: failure.error_message,
+        source_app: input.source_app,
+        raw_path: failure.raw_path
+      })),
+      created_at: startedAt,
+      updated_at: finishedAt
+    });
+
     await logger.info({
       run_id: runId,
       event_type: "manual_import_completed",
@@ -137,7 +165,7 @@ export async function runManualImportNormalization(
 
     return summary;
   } finally {
-    normalizedStore.close();
+    storage.close();
   }
 }
 
@@ -169,7 +197,7 @@ function buildP1PendingKnowledgeAtom(record: NormalizedRecord): KnowledgeAtom {
     ].join("\n"),
     source_app: record.source_app,
     source_record_ids: [record.record_id],
-    source_raw_paths: [record.raw_path],
+    source_raw_paths: [record.raw_archive_path],
     project: record.project,
     tags: ["P1验证", "AI对话"],
     sensitivity: record.sensitivity,

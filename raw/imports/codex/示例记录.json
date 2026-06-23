@@ -7,6 +7,7 @@
   "topic": "手动导入 JSON 示例",
   "raw_path": "raw/imports/codex/示例记录.json",
   "raw_source": "手动示例记录",
+  "sensitivity": "personal",
   "messages": [
     {
       "role": "user",

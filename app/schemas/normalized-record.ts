@@ -25,6 +25,8 @@ export interface NormalizedRecord extends TimestampedRecord {
   user_message: string;
   ai_message: string;
   raw_path: VaultRelativePath;
+  raw_archive_path: VaultRelativePath;
+  raw_checksum: string;
   raw_source: string;
   sensitivity: Sensitivity;
   can_enter_personal_kb: boolean;

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { appendFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import type { SourceApp, VaultRelativePath } from "../schemas";
+import { resolveVaultPath } from "../storage/paths";
 
 export type RunLogLevel = "info" | "warn" | "error";
 
@@ -114,15 +115,4 @@ export function sanitizeLogMessage(message: string): string {
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 240);
-}
-
-function resolveVaultPath(vaultRoot: string, vaultRelativePath: VaultRelativePath): string {
-  const resolved = path.resolve(vaultRoot, vaultRelativePath);
-  const root = path.resolve(vaultRoot);
-
-  if (!resolved.startsWith(root + path.sep) && resolved !== root) {
-    throw new Error(`Path escapes vault root: ${vaultRelativePath}`);
-  }
-
-  return resolved;
 }

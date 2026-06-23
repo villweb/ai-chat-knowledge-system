@@ -22,6 +22,7 @@ type JsonInput = {
   topic?: string;
   raw_path?: string;
   raw_source?: string;
+  sensitivity?: Sensitivity;
   user_message?: string;
   ai_message?: string;
   messages?: JsonMessage[];
@@ -67,9 +68,11 @@ export function normalizeManualImport(document: RawSourceDocument, now = new Dat
       user_message: turn.user_message,
       ai_message: turn.ai_message,
       raw_path: document.raw_path,
+      raw_archive_path: document.raw_path,
+      raw_checksum: createHash("sha256").update(document.content, "utf8").digest("hex"),
       raw_source: parsed.raw_source,
       sensitivity: parsed.sensitivity,
-      can_enter_personal_kb: parsed.sensitivity !== "confidential",
+      can_enter_personal_kb: parsed.sensitivity === "personal",
       created_at: now,
       updated_at: now
     };
@@ -97,7 +100,7 @@ function parseJsonDocument(document: RawSourceDocument): ParsedDocument {
     project: input.project ?? "unknown",
     topic: input.topic ?? "unknown",
     raw_source: input.raw_source ?? document.raw_source,
-    sensitivity: "personal" as Sensitivity
+    sensitivity: parseSensitivity(input.sensitivity)
   };
 
   if (input.user_message !== undefined && input.ai_message !== undefined) {
@@ -159,7 +162,7 @@ function parseTxtDocument(document: RawSourceDocument): ParsedDocument {
     project: "unknown",
     topic: "unknown",
     raw_source: document.raw_source,
-    sensitivity: "personal",
+    sensitivity: "private",
     turns: [
       {
         turn_index: 0,
@@ -269,7 +272,7 @@ function requireFrontMatter(frontMatter: Record<string, string>, key: string): s
 
 function parseSensitivity(value: string | undefined): Sensitivity {
   if (value === undefined) {
-    return "personal";
+    return "private";
   }
 
   if (value === "personal" || value === "private" || value === "confidential") {

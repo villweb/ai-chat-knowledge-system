@@ -19,6 +19,7 @@ export interface WorkspacePaths {
 
 export interface RawArchiveRef {
   raw_path: VaultRelativePath;
+  archived_path: VaultRelativePath;
   checksum: string;
 }
 

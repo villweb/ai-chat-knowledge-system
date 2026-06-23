@@ -8,6 +8,7 @@ import type {
   ReviewStatus,
   VaultRelativePath
 } from "../schemas";
+import { resolveVaultPath } from "./paths";
 import type { StorageProvider } from "./storage-provider";
 
 export interface KnowledgeAtomMarkdownWriterOptions {
@@ -104,15 +105,4 @@ function statusToDirectory(status: ReviewStatus): string {
   }
 
   return status;
-}
-
-function resolveVaultPath(vaultRoot: string, vaultRelativePath: VaultRelativePath): string {
-  const resolved = path.resolve(vaultRoot, vaultRelativePath);
-  const root = path.resolve(vaultRoot);
-
-  if (!resolved.startsWith(root + path.sep) && resolved !== root) {
-    throw new Error(`Path escapes vault root: ${vaultRelativePath}`);
-  }
-
-  return resolved;
 }

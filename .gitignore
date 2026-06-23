@@ -35,6 +35,10 @@ raw/imports/**
 !raw/imports/**/.gitkeep
 !raw/imports/codex/示例记录.md
 !raw/imports/codex/示例记录.json
+raw/archive/**
+!raw/archive/
+!raw/archive/**/
+!raw/archive/**/.gitkeep
 knowledge/**
 !knowledge/
 !knowledge/**/

@@ -14,12 +14,16 @@ export interface CoreEngineDependencies {
 }
 
 export interface CoreEngine {
-  readonly dependencies: CoreEngineDependencies;
+  readonly dependencies: CoreEngineDependencies | undefined;
   runManualImportNormalization(input: ManualImportNormalizationInput): Promise<ManualImportNormalizationSummary>;
 }
 
 export class LocalCoreEngine implements CoreEngine {
-  constructor(readonly dependencies: CoreEngineDependencies) {}
+  readonly dependencies: CoreEngineDependencies | undefined;
+
+  constructor(dependencies?: CoreEngineDependencies) {
+    this.dependencies = dependencies;
+  }
 
   async runManualImportNormalization(
     input: ManualImportNormalizationInput

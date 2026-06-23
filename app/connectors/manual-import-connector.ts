@@ -1,6 +1,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import type { SourceApp, VaultRelativePath } from "../schemas";
+import { resolveVaultPath, toVaultRelativePath } from "../storage/paths";
 import type {
   RawContentType,
   RawSourceDocument,
@@ -99,19 +100,4 @@ function inferSourceApp(absolutePath: string): SourceApp {
   }
 
   throw new Error(`Cannot infer source app from path: ${absolutePath}`);
-}
-
-function resolveVaultPath(vaultRoot: string, vaultRelativePath: VaultRelativePath): string {
-  const resolved = path.resolve(vaultRoot, vaultRelativePath);
-  const root = path.resolve(vaultRoot);
-
-  if (!resolved.startsWith(root + path.sep) && resolved !== root) {
-    throw new Error(`Path escapes vault root: ${vaultRelativePath}`);
-  }
-
-  return resolved;
-}
-
-function toVaultRelativePath(vaultRoot: string, absolutePath: string): VaultRelativePath {
-  return path.relative(vaultRoot, absolutePath).split(path.sep).join("/");
 }
