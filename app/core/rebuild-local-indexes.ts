@@ -138,7 +138,9 @@ async function readArchiveMetadata(archiveFilePath: string): Promise<RawArchiveM
 
 async function listKnowledgeAtoms(vaultRoot: string, knowledgeDir: VaultRelativePath): Promise<KnowledgeAtom[]> {
   const root = resolveVaultPath(vaultRoot, knowledgeDir);
-  const files = (await listFiles(root)).filter((file) => path.extname(file).toLowerCase() === ".md");
+  const files = (await listFiles(root))
+    .filter((file) => path.extname(file).toLowerCase() === ".md")
+    .filter((file) => !isObsidianIndexFile(file));
   const atoms: KnowledgeAtom[] = [];
 
   for (const file of files) {
@@ -170,6 +172,11 @@ async function listFiles(root: string): Promise<string[]> {
   }
 
   return files;
+}
+
+/** Obsidian 索引文件（如 _index.md）不是知识原子，重建索引时应跳过。 */
+function isObsidianIndexFile(filePath: string): boolean {
+  return path.basename(filePath) === "_index.md";
 }
 
 function getRawContentType(rawPath: VaultRelativePath): RawContentType | null {

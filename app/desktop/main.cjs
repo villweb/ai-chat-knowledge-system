@@ -38,6 +38,8 @@ let automationTimer = null;
 let automationRunning = false;
 let pendingAutomationRun = null;
 let lastAutomationDecision = null;
+// 桌面端流水线状态，供界面展示当前处理阶段
+let pipelinePhase = "idle";
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -95,7 +97,8 @@ function registerIpc() {
       privacy,
       release: getReleaseState(),
       commercial: await getCommercialState(),
-      logs: await listLogs()
+      logs: await listLogs(),
+      pipeline: getPipelineState()
     };
   });
 
@@ -170,38 +173,97 @@ function registerIpc() {
       filters: [{ name: "AI chat exports", extensions: ["md", "markdown", "txt", "json"] }]
     });
     if (result.canceled) {
-      return { copied_file_count: 0 };
+      return { copied_file_count: 0, auto_processed: false };
     }
 
-    const targetDir = path.join(state.vaultRoot, "raw/imports", targetSource);
+    const importPath = `raw/imports/${targetSource}`;
+    const targetDir = path.join(state.vaultRoot, importPath);
     await mkdir(targetDir, { recursive: true });
+    const copiedNames = [];
     for (const file of result.filePaths) {
-      await copyFile(file, path.join(targetDir, path.basename(file)));
+      const fileName = path.basename(file);
+      await copyFile(file, path.join(targetDir, fileName));
+      copiedNames.push(fileName);
     }
-    pushEvent("manual_import_files", `已导入 ${result.filePaths.length} 个文件。`);
-    return { copied_file_count: result.filePaths.length };
+
+    pipelinePhase = "importing";
+    pushEvent("manual_import_files", `已导入 ${result.filePaths.length} 个文件到 ${importPath}，正在自动标准化和提炼...`);
+
+    try {
+      pipelinePhase = "processing";
+      const pipelineResult = await runDailyWorkflow(undefined, undefined, { uiManualImport: true });
+      const atoms = await listAtoms();
+      const pendingCount = atoms.filter((item) => item.atom.review_status === "pending").length;
+      const importSummary = parseScriptStdout(pipelineResult.importResult);
+      const extractSummary = parseScriptStdout(pipelineResult.extractResult);
+      pipelinePhase = pendingCount > 0 ? "waiting_review" : "done";
+      pushEvent(
+        "import_pipeline_completed",
+        `导入完成：${result.filePaths.length} 个文件已处理，${pendingCount} 条知识待确认。`
+      );
+      return {
+        copied_file_count: result.filePaths.length,
+        copied_file_names: copiedNames,
+        source_app: targetSource,
+        import_path: importPath,
+        auto_processed: true,
+        pending_atom_count: pendingCount,
+        total_atom_count: atoms.length,
+        normalized_record_count: importSummary?.normalized_record_count ?? 0,
+        generated_atom_count: Math.max(
+          importSummary?.generated_atom_count ?? 0,
+          extractSummary?.generated_atom_count ?? 0
+        ),
+        failed_file_count: importSummary?.failed_file_count ?? 0,
+        blocked_record_count: extractSummary?.blocked_record_count ?? 0,
+        used_personal_default: true,
+        pipeline: getPipelineState(),
+        ...pipelineResult
+      };
+    } catch (error) {
+      pipelinePhase = "idle";
+      throw error;
+    }
   });
 
   ipcMain.handle("workflow:run-import", async () => {
     ensureSourceEnabled(state.sourceApp);
-    const result = await runScript("scripts/run-manual-import-normalization.ts", [
-      "--source-app",
-      state.sourceApp,
-      "--vault-root",
-      state.vaultRoot
-    ]);
-    if (!result.ok) {
-      pushEvent("p1_import", result.stderr);
-      throw new Error(result.stderr || "导入和标准化失败。");
+    pipelinePhase = "processing";
+    try {
+      const result = await runScript("scripts/run-manual-import-normalization.ts", [
+        "--source-app",
+        state.sourceApp,
+        "--vault-root",
+        state.vaultRoot
+      ]);
+      if (!result.ok) {
+        pushEvent("p1_import", result.stderr);
+        throw new Error(result.stderr || "导入和标准化失败。");
+      }
+      const atoms = await listAtoms();
+      const pendingCount = atoms.filter((item) => item.atom.review_status === "pending").length;
+      pipelinePhase = pendingCount > 0 ? "waiting_review" : "done";
+      pushEvent("p1_import", `导入和标准化完成，${pendingCount} 条知识待确认。`);
+      return { ...result, pending_atom_count: pendingCount, pipeline: getPipelineState() };
+    } catch (error) {
+      pipelinePhase = "idle";
+      throw error;
     }
-    pushEvent("p1_import", "导入和标准化完成。");
-    return result;
   });
 
   ipcMain.handle("workflow:run-daily", async () => {
-    const { importResult, extractResult } = await runDailyWorkflow();
-    pushEvent("daily_run", "每日沉淀完成。");
-    return { importResult, extractResult };
+    pipelinePhase = "processing";
+    try {
+      const { importResult, extractResult } = await runDailyWorkflow();
+      const atoms = await listAtoms();
+      const pendingCount = atoms.filter((item) => item.atom.review_status === "pending").length;
+      pipelinePhase = pendingCount > 0 ? "waiting_review" : "done";
+      pushEvent("daily_run", `每日沉淀完成，${pendingCount} 条知识待确认。`);
+      return { importResult, extractResult, pending_atom_count: pendingCount, pipeline: getPipelineState() };
+    } catch (error) {
+      pipelinePhase = "idle";
+      throw error;
+    }
   });
 
   ipcMain.handle("atoms:list", async () => listAtoms());
@@ -568,7 +630,7 @@ async function runAutomationDate(runDate, reason) {
   }
 }
 
-async function runDailyWorkflow(runDate, runIdPrefix) {
+async function runDailyWorkflow(runDate, runIdPrefix, options = {}) {
   ensureSourceEnabled(state.sourceApp);
   const importArgs = [
     "--source-app",
@@ -576,6 +638,9 @@ async function runDailyWorkflow(runDate, runIdPrefix) {
     "--vault-root",
     state.vaultRoot
   ];
+  if (options.uiManualImport) {
+    importArgs.push("--default-sensitivity-missing", "personal");
+  }
   const extractArgs = [
     "--source-app",
     state.sourceApp,
@@ -717,6 +782,25 @@ async function listLogs() {
   }
 }
 
+function getPipelineState() {
+  return {
+    phase: pipelinePhase,
+    label: pipelinePhaseLabel(pipelinePhase),
+    updated_at: new Date().toISOString()
+  };
+}
+
+function pipelinePhaseLabel(phase) {
+  const labels = {
+    idle: "空闲",
+    importing: "正在导入",
+    processing: "正在提炼",
+    waiting_review: "等待审查",
+    done: "已完成"
+  };
+  return labels[phase] ?? "空闲";
+}
+
 function pushEvent(type, message) {
   state.events.unshift({
     event_id: `ui_${Date.now()}`,
@@ -733,4 +817,16 @@ function toErrorMessage(error) {
   }
 
   return String(error);
+}
+
+function parseScriptStdout(result) {
+  if (!result?.stdout?.trim()) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(result.stdout);
+  } catch {
+    return null;
+  }
 }

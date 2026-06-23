@@ -9,6 +9,7 @@ import {
   SCHEMA_VERSION,
   type KnowledgeAtom,
   type NormalizedRecord,
+  type Sensitivity,
   type SourceApp,
   type VaultRelativePath
 } from "../schemas";
@@ -20,6 +21,8 @@ export interface ManualImportNormalizationInput {
   source_app: SourceApp;
   run_id?: string;
   run_date?: string;
+  // UI 手动选文件导入时，未标注 sensitivity 的记录默认视为 personal
+  default_sensitivity_when_missing?: Sensitivity;
   raw_imports_dir?: VaultRelativePath;
   sqlite_path?: VaultRelativePath;
   knowledge_dir?: VaultRelativePath;
@@ -89,7 +92,10 @@ export async function runManualImportNormalization(
         });
         const archiveRef = await storage.archiveRawDocument(document);
 
-        const records = normalizeManualImport(document).map((record) => ({
+        const normalizeOptions = input.default_sensitivity_when_missing
+          ? { defaultSensitivityWhenMissing: input.default_sensitivity_when_missing }
+          : {};
+        const records = normalizeManualImport(document, undefined, normalizeOptions).map((record) => ({
           ...record,
           raw_archive_path: archiveRef.archived_path,
           raw_checksum: archiveRef.checksum

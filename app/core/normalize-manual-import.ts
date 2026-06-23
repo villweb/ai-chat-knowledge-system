@@ -48,8 +48,18 @@ type ParsedDocument = {
   turns: ParsedTurn[];
 };
 
-export function normalizeManualImport(document: RawSourceDocument, now = new Date().toISOString()): NormalizedRecord[] {
-  const parsed = parseDocument(document);
+export interface NormalizeManualImportOptions {
+  // 手动导入时若文件未标注 sensitivity，使用的默认值
+  defaultSensitivityWhenMissing?: Sensitivity;
+}
+
+export function normalizeManualImport(
+  document: RawSourceDocument,
+  now = new Date().toISOString(),
+  options: NormalizeManualImportOptions = {}
+): NormalizedRecord[] {
+  const defaultSensitivityWhenMissing = options.defaultSensitivityWhenMissing ?? "private";
+  const parsed = parseDocument(document, defaultSensitivityWhenMissing);
 
   return parsed.turns.map((turn) => {
     const recordId = createRecordId(document, parsed.conversation_id, turn);
@@ -81,19 +91,19 @@ export function normalizeManualImport(document: RawSourceDocument, now = new Dat
   });
 }
 
-function parseDocument(document: RawSourceDocument): ParsedDocument {
+function parseDocument(document: RawSourceDocument, defaultSensitivityWhenMissing: Sensitivity): ParsedDocument {
   if (document.content_type === "json") {
-    return parseJsonDocument(document);
+    return parseJsonDocument(document, defaultSensitivityWhenMissing);
   }
 
   if (document.content_type === "markdown") {
-    return parseMarkdownDocument(document);
+    return parseMarkdownDocument(document, defaultSensitivityWhenMissing);
   }
 
-  return parseTxtDocument(document);
+  return parseTxtDocument(document, defaultSensitivityWhenMissing);
 }
 
-function parseJsonDocument(document: RawSourceDocument): ParsedDocument {
+function parseJsonDocument(document: RawSourceDocument, defaultSensitivityWhenMissing: Sensitivity): ParsedDocument {
   const input = JSON.parse(document.content) as JsonInput;
   assertJsonSource(input, document);
 
@@ -103,7 +113,7 @@ function parseJsonDocument(document: RawSourceDocument): ParsedDocument {
     topic: input.topic ?? "unknown",
     raw_path: input.raw_path ?? document.raw_path,
     raw_source: input.raw_source ?? document.raw_source,
-    sensitivity: parseSensitivity(input.sensitivity)
+    sensitivity: parseSensitivity(input.sensitivity, defaultSensitivityWhenMissing)
   };
 
   if (input.user_message !== undefined && input.ai_message !== undefined) {
@@ -132,7 +142,7 @@ function parseJsonDocument(document: RawSourceDocument): ParsedDocument {
   };
 }
 
-function parseMarkdownDocument(document: RawSourceDocument): ParsedDocument {
+function parseMarkdownDocument(document: RawSourceDocument, defaultSensitivityWhenMissing: Sensitivity): ParsedDocument {
   const { frontMatter, body } = parseFrontMatter(document.content);
   const userMessage = extractSection(body, "用户消息");
   const aiMessage = extractSection(body, "AI 回复");
@@ -143,7 +153,7 @@ function parseMarkdownDocument(document: RawSourceDocument): ParsedDocument {
     topic: optionalFrontMatter(frontMatter, "topic") ?? "unknown",
     raw_path: optionalFrontMatter(frontMatter, "raw_path") ?? document.raw_path,
     raw_source: optionalFrontMatter(frontMatter, "raw_source") ?? document.raw_source,
-    sensitivity: parseSensitivity(optionalFrontMatter(frontMatter, "sensitivity")),
+    sensitivity: parseSensitivity(optionalFrontMatter(frontMatter, "sensitivity"), defaultSensitivityWhenMissing),
     turns: [
       {
         turn_index: 0,
@@ -157,7 +167,7 @@ function parseMarkdownDocument(document: RawSourceDocument): ParsedDocument {
   };
 }
 
-function parseTxtDocument(document: RawSourceDocument): ParsedDocument {
+function parseTxtDocument(document: RawSourceDocument, defaultSensitivityWhenMissing: Sensitivity): ParsedDocument {
   const userMessage = extractSection(document.content, "用户消息");
   const aiMessage = extractSection(document.content, "AI 回复");
 
@@ -167,7 +177,7 @@ function parseTxtDocument(document: RawSourceDocument): ParsedDocument {
     topic: "unknown",
     raw_path: document.raw_path,
     raw_source: document.raw_source,
-    sensitivity: "private",
+    sensitivity: defaultSensitivityWhenMissing,
     turns: [
       {
         turn_index: 0,
@@ -274,9 +284,9 @@ function optionalFrontMatter(frontMatter: Record<string, unknown>, key: string):
   return String(value);
 }
 
-function parseSensitivity(value: string | undefined): Sensitivity {
+function parseSensitivity(value: string | undefined, defaultWhenMissing: Sensitivity = "private"): Sensitivity {
   if (value === undefined) {
-    return "private";
+    return defaultWhenMissing;
   }
 
   if (value === "personal" || value === "private" || value === "confidential") {

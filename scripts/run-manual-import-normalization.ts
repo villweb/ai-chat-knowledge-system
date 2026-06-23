@@ -7,6 +7,7 @@ type CliOptions = {
   source_app: SourceApp;
   run_id?: string;
   run_date?: string;
+  default_sensitivity_when_missing?: "personal" | "private" | "confidential";
 };
 
 const SOURCE_APPS = new Set<SourceApp>(["codex", "cursor", "deepseek", "doubao", "workbuddy"]);
@@ -40,11 +41,19 @@ function parseArgs(args: string[]): CliOptions {
   };
   const runId = values.get("run-id");
   const runDate = values.get("run-date");
+  const defaultSensitivityMissing = values.get("default-sensitivity-missing");
   if (runId) {
     result.run_id = runId;
   }
   if (runDate) {
     result.run_date = runDate;
+  }
+  if (
+    defaultSensitivityMissing === "personal" ||
+    defaultSensitivityMissing === "private" ||
+    defaultSensitivityMissing === "confidential"
+  ) {
+    result.default_sensitivity_when_missing = defaultSensitivityMissing;
   }
 
   return result;

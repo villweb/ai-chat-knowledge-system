@@ -39,6 +39,7 @@ type ReviewStatus = "pending" | "approved" | "rejected" | "merged";
 type KnowledgeAtomType = "观点" | "方法" | "决策" | "经验" | "素材" | "问题" | "偏好";
 type NavKey = "guide" | "sources" | "import" | "run" | "library" | "privacy" | "commercial" | "pending" | "detail" | "settings" | "logs";
 type SourceConnectorStatus = "available" | "reserved";
+type PipelinePhase = "idle" | "importing" | "processing" | "waiting_review" | "done";
 type RawRetentionMode = "keep_forever" | "delete_after_days" | "delete_after_successful_run";
 type FeedbackCategory = "bug" | "feature" | "billing" | "other";
 
@@ -191,6 +192,27 @@ interface SensitiveScanResult {
   findings: Array<{ rule_id: string; label: string; sensitivity: string; severity: string; match_preview: string }>;
 }
 
+interface PipelineState {
+  phase: PipelinePhase;
+  label: string;
+  updated_at: string;
+}
+
+interface ImportResult {
+  copied_file_count?: number;
+  copied_file_names?: string[];
+  source_app?: string;
+  import_path?: string;
+  auto_processed?: boolean;
+  pending_atom_count?: number;
+  total_atom_count?: number;
+  normalized_record_count?: number;
+  generated_atom_count?: number;
+  failed_file_count?: number;
+  blocked_record_count?: number;
+  used_personal_default?: boolean;
+}
+
 interface ReleaseState {
   app_name: string;
   app_id: string;
@@ -259,6 +281,7 @@ interface DesktopState {
   release: ReleaseState;
   commercial: CommercialState;
   logs: LogEvent[];
+  pipeline?: PipelineState;
 }
 
 interface SessionConfigInput {
@@ -282,7 +305,7 @@ interface AtomUpdateInput {
 interface DesktopApi {
   getState(): Promise<DesktopState>;
   chooseVault(): Promise<DesktopState>;
-  chooseImportFiles(sourceApp: string): Promise<unknown>;
+  chooseImportFiles(sourceApp: string): Promise<ImportResult>;
   runImport(): Promise<unknown>;
   runDaily(): Promise<unknown>;
   listAtoms(): Promise<KnowledgeAtomDocument[]>;
@@ -325,6 +348,14 @@ declare global {
 }
 
 const desktopApi = getDesktopApi();
+
+const ONBOARDING_DISMISS_KEY = "ai-kb-onboarding-dismissed";
+
+const onboardingSteps = [
+  { step: 1, label: "导入", hint: "选择 AI 聊天导出文件" },
+  { step: 2, label: "自动提炼", hint: "系统自动标准化并生成候选知识" },
+  { step: 3, label: "待确认审查", hint: "在「待确认」中批准或拒绝" }
+];
 
 const navItems: Array<{ key: NavKey; label: string; icon: React.ComponentType<{ size?: number }> }> = [
   { key: "guide", label: "引导", icon: BookOpenCheck },
@@ -398,7 +429,8 @@ function getDesktopApi(): DesktopApi {
     privacy: buildPreviewPrivacy(),
     release: buildPreviewRelease(),
     commercial: buildPreviewCommercial(),
-    logs: [sampleLog]
+    logs: [sampleLog],
+    pipeline: { phase: "idle", label: "空闲", updated_at: new Date().toISOString() }
   };
 
   return {
@@ -409,7 +441,15 @@ function getDesktopApi(): DesktopApi {
       return previewState;
     },
     async chooseImportFiles() {
-      return { copied: 0 };
+      return {
+        copied_file_count: 1,
+        copied_file_names: ["preview-chat.md"],
+        source_app: "codex",
+        import_path: "raw/imports/codex",
+        auto_processed: true,
+        pending_atom_count: 1,
+        total_atom_count: previewState.atoms.length
+      };
     },
     async runImport() {
       return { ok: true };
@@ -780,13 +820,22 @@ function previewConnector(sourceApp: string, displayName: string, status: Source
 }
 
 function App() {
-  const [active, setActive] = useState<NavKey>("guide");
+  const [active, setActive] = useState<NavKey>("import");
   const [state, setState] = useState<DesktopState | null>(null);
   const [selectedId, setSelectedId] = useState("");
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  const [noticeKind, setNoticeKind] = useState<"info" | "error">("info");
   const [bootError, setBootError] = useState("");
+  const [onboardingDismissed, setOnboardingDismissed] = useState(() => {
+    try {
+      return localStorage.getItem(ONBOARDING_DISMISS_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const [hasInitializedNav, setHasInitializedNav] = useState(false);
 
   useEffect(() => {
     void refresh();
@@ -795,20 +844,6 @@ function App() {
   const selected = useMemo(() => {
     return state?.atoms.find((item) => item.atom.atom_id === selectedId) ?? state?.atoms[0] ?? null;
   }, [selectedId, state]);
-
-  const filteredAtoms = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    return (state?.atoms ?? []).filter((item) => {
-      if (!needle) {
-        return true;
-      }
-
-      return [item.atom.title, item.atom.content, item.atom.evidence, item.atom.project, item.atom.tags.join(" ")]
-        .join(" ")
-        .toLowerCase()
-        .includes(needle);
-    });
-  }, [query, state]);
 
   const counts = useMemo(() => {
     const items = state?.atoms ?? [];
@@ -820,11 +855,29 @@ function App() {
     };
   }, [state]);
 
+  const pipeline = useMemo(() => {
+    if (busy) {
+      return { phase: "processing" as PipelinePhase, label: "正在处理" };
+    }
+    if (counts.pending > 0) {
+      return { phase: "waiting_review" as PipelinePhase, label: "等待审查" };
+    }
+    if (state?.pipeline && state.pipeline.phase !== "waiting_review") {
+      return state.pipeline;
+    }
+    return { phase: "idle" as PipelinePhase, label: "空闲" };
+  }, [busy, counts.pending, state?.pipeline]);
+
   async function refresh() {
     try {
       const nextState = await desktopApi.getState() as DesktopState;
       setBootError("");
       setState(nextState);
+      if (!hasInitializedNav) {
+        const pendingCount = nextState.atoms.filter((item) => item.atom.review_status === "pending").length;
+        setActive(nextState.atoms.length === 0 ? "import" : (pendingCount > 0 ? "pending" : "import"));
+        setHasInitializedNav(true);
+      }
       if (!selectedId && nextState.atoms[0]) {
         setSelectedId(nextState.atoms[0].atom.atom_id);
       }
@@ -838,15 +891,85 @@ function App() {
     }
   }
 
-  async function withBusy(action: () => Promise<unknown>, successMessage: string) {
+  function dismissOnboarding() {
+    setOnboardingDismissed(true);
+    try {
+      localStorage.setItem(ONBOARDING_DISMISS_KEY, "1");
+    } catch {
+      // 忽略本地存储不可用
+    }
+  }
+
+  function formatImportSuccess(result: ImportResult): string {
+    if (!result.copied_file_count) {
+      return "未选择文件。";
+    }
+
+    const names = result.copied_file_names?.join("、") ?? `${result.copied_file_count} 个文件`;
+    const importPath = result.import_path ?? "raw/imports";
+    const pending = result.pending_atom_count ?? 0;
+    const normalized = result.normalized_record_count ?? 0;
+    const generated = result.generated_atom_count ?? 0;
+    const failed = result.failed_file_count ?? 0;
+    const blocked = result.blocked_record_count ?? 0;
+
+    let message = `已导入 ${names} 到 ${importPath}，并完成自动提炼。`;
+    if (pending > 0) {
+      message += `${pending} 条知识在「待确认」等待审查。`;
+      return message;
+    }
+
+    message += "当前 0 条待确认。";
+    if (failed > 0) {
+      message += ` ${failed} 个文件处理失败，请查看「日志」。`;
+    }
+    if (normalized > 0 && generated === 0) {
+      if (result.used_personal_default) {
+        message += ` 已标准化 ${normalized} 条记录，但未生成候选知识：内容可能被敏感规则阻断（阻断 ${blocked} 条），或格式不符合要求。`;
+      } else {
+        message += ` 已标准化 ${normalized} 条记录，但未生成候选知识：文件未标记 sensitivity: personal，或内容被敏感规则阻断。`;
+      }
+    } else if (normalized === 0 && failed === 0) {
+      message += " 未能从文件中解析出有效对话记录，请确认格式包含「用户消息」和「AI 回复」章节。";
+    }
+    return message;
+  }
+
+  async function withBusy(action: () => Promise<unknown>, successMessage: string, kind: "info" | "error" = "info") {
     setBusy(true);
     setNotice("");
+    setNoticeKind("info");
     try {
       await action();
       setNotice(successMessage);
+      setNoticeKind(kind);
       await refresh();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
+      setNoticeKind("error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleImport() {
+    setBusy(true);
+    setNotice("");
+    setNoticeKind("info");
+    try {
+      const result = await desktopApi.chooseImportFiles(state!.sourceApp) as ImportResult;
+      if (!result.copied_file_count) {
+        setNotice("未选择文件。");
+        return;
+      }
+      setNotice(formatImportSuccess(result));
+      await refresh();
+      if ((result.pending_atom_count ?? 0) > 0) {
+        setActive("pending");
+      }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+      setNoticeKind("error");
     } finally {
       setBusy(false);
     }
@@ -881,10 +1004,12 @@ function App() {
         <nav>
           {navItems.map((item) => {
             const Icon = item.icon;
+            const showBadge = item.key === "pending" && counts.pending > 0;
             return (
               <button key={item.key} className={active === item.key ? "nav active" : "nav"} onClick={() => setActive(item.key)} title={item.label}>
                 <Icon size={18} />
                 <span>{item.label}</span>
+                {showBadge && <span className="navBadge">{counts.pending}</span>}
               </button>
             );
           })}
@@ -905,16 +1030,44 @@ function App() {
             <h1>{titleFor(active)}</h1>
             <p>{subtitleFor(active)}</p>
           </div>
-          <button className="iconOnly" onClick={refresh} title="刷新" disabled={busy}>
-            <RefreshCw size={18} />
-          </button>
+          <div className="topbarActions">
+            <PipelineStatusBar pipeline={pipeline} pendingCount={counts.pending} />
+            {counts.pending > 0 && active !== "pending" && (
+              <button className="primary nextAction" onClick={() => setActive("pending")} disabled={busy}>
+                <ListChecks size={16} />
+                <span>去审查待确认知识</span>
+                <span className="navBadge">{counts.pending}</span>
+              </button>
+            )}
+            <button className="iconOnly" onClick={() => void refresh()} title="刷新" disabled={busy}>
+              <RefreshCw size={18} />
+            </button>
+          </div>
         </header>
 
-        {notice && <div className="notice">{notice}</div>}
+        {!onboardingDismissed && (
+          <OnboardingBanner
+            steps={onboardingSteps}
+            activeStep={counts.pending > 0 ? 3 : (state.atoms.length > 0 ? 2 : 1)}
+            onDismiss={dismissOnboarding}
+            onGoImport={() => setActive("import")}
+            onGoPending={() => setActive("pending")}
+          />
+        )}
 
-        {active === "guide" && <GuidePanel state={state} counts={counts} />}
+        {notice && <div className={noticeKind === "error" ? "notice error" : "notice"}>{notice}</div>}
+
+        {active === "guide" && <GuidePanel state={state} counts={counts} onGoImport={() => setActive("import")} onGoPending={() => setActive("pending")} />}
         {active === "sources" && <SourcesPanel connectors={state.connectors} sourceApp={state.sourceApp} busy={busy} onToggle={(sourceApp, enabled) => withBusy(() => desktopApi.setConnectorEnabled({ sourceApp, enabled }), "连接器状态已更新")} />}
-        {active === "import" && <ImportPanel busy={busy} onChoose={() => withBusy(() => desktopApi.chooseImportFiles(state.sourceApp), "文件已导入")} onRun={() => withBusy(() => desktopApi.runImport(), "导入和标准化完成")} />}
+        {active === "import" && (
+          <ImportPanel
+            busy={busy}
+            sourceApp={state.sourceApp}
+            importPath={`raw/imports/${state.sourceApp}`}
+            onImport={() => void handleImport()}
+            onRunNormalize={() => withBusy(() => desktopApi.runImport(), "标准化完成，请到「待确认」查看结果。")}
+          />
+        )}
         {active === "run" && (
           <RunPanel
             busy={busy}
@@ -963,7 +1116,16 @@ function App() {
             onCreateFeedback={(input) => withBusy(() => desktopApi.createFeedbackDraft(input), "反馈草稿已创建")}
           />
         )}
-        {active === "pending" && <PendingPanel atoms={filteredAtoms} counts={counts} query={query} selectedId={selected?.atom.atom_id ?? ""} onQuery={setQuery} onSelect={(atomId) => { setSelectedId(atomId); setActive("detail"); }} />}
+        {active === "pending" && (
+          <PendingPanel
+            atoms={state.atoms}
+            counts={counts}
+            query={query}
+            selectedId={selected?.atom.atom_id ?? ""}
+            onQuery={setQuery}
+            onSelect={(atomId) => { setSelectedId(atomId); setActive("detail"); }}
+          />
+        )}
         {active === "detail" && selected && <DetailPanel document={selected} atoms={state.atoms} busy={busy} onUpdate={(input) => withBusy(() => desktopApi.updateAtom(input), "知识已更新")} />}
         {active === "settings" && <SettingsPanel state={state} busy={busy} onSave={(input) => withBusy(() => desktopApi.saveSessionConfig(input), "会话配置已保存")} onCheckUpdates={() => withBusy(() => desktopApi.checkForUpdates(), "更新检查完成")} />}
         {active === "logs" && <LogsPanel logs={[...state.events, ...state.logs]} />}
@@ -972,7 +1134,65 @@ function App() {
   );
 }
 
-function GuidePanel({ state, counts }: { state: DesktopState; counts: Record<ReviewStatus, number> }) {
+function OnboardingBanner({
+  steps,
+  activeStep,
+  onDismiss,
+  onGoImport,
+  onGoPending
+}: {
+  steps: Array<{ step: number; label: string; hint: string }>;
+  activeStep: number;
+  onDismiss: () => void;
+  onGoImport: () => void;
+  onGoPending: () => void;
+}) {
+  return (
+    <div className="onboardingBanner">
+      <div className="onboardingHead">
+        <strong>三步完成首次沉淀</strong>
+        <button className="iconOnly" onClick={onDismiss} title="关闭引导"><X size={16} /></button>
+      </div>
+      <div className="onboardingSteps">
+        {steps.map((item) => (
+          <div key={item.step} className={activeStep >= item.step ? "onboardingStep active" : "onboardingStep"}>
+            <span className="stepNumber">{item.step}</span>
+            <div>
+              <strong>{item.label}</strong>
+              <small>{item.hint}</small>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="onboardingActions">
+        <button className="primary" onClick={onGoImport}><FileInput size={16} />去导入</button>
+        {activeStep >= 3 && <button onClick={onGoPending}><ListChecks size={16} />去待确认</button>}
+      </div>
+    </div>
+  );
+}
+
+function PipelineStatusBar({ pipeline, pendingCount }: { pipeline: { phase: PipelinePhase; label: string }; pendingCount: number }) {
+  return (
+    <div className={`pipelineStatus phase-${pipeline.phase}`}>
+      <Clock size={15} />
+      <span>{pipeline.label}</span>
+      {pendingCount > 0 && <span className="pipelineMeta">待确认 {pendingCount}</span>}
+    </div>
+  );
+}
+
+function GuidePanel({
+  state,
+  counts,
+  onGoImport,
+  onGoPending
+}: {
+  state: DesktopState;
+  counts: Record<ReviewStatus, number>;
+  onGoImport: () => void;
+  onGoPending: () => void;
+}) {
   return (
     <div className="grid two">
       <section className="panel">
@@ -982,6 +1202,10 @@ function GuidePanel({ state, counts }: { state: DesktopState; counts: Record<Rev
           <Metric label="已批准" value={counts.approved} />
           <Metric label="已拒绝" value={counts.rejected} />
           <Metric label="已合并" value={counts.merged} />
+        </div>
+        <div className="actions" style={{ marginTop: 14 }}>
+          <button className="primary" onClick={onGoImport}><FileInput size={16} />导入聊天文件</button>
+          {counts.pending > 0 && <button onClick={onGoPending}><ListChecks size={16} />审查待确认 ({counts.pending})</button>}
         </div>
       </section>
       <section className="panel">
@@ -1032,18 +1256,38 @@ function SourcesPanel({ connectors, sourceApp, busy, onToggle }: { connectors: S
   );
 }
 
-function ImportPanel({ busy, onChoose, onRun }: { busy: boolean; onChoose: () => void; onRun: () => void }) {
+function ImportPanel({
+  busy,
+  sourceApp,
+  importPath,
+  onImport,
+  onRunNormalize
+}: {
+  busy: boolean;
+  sourceApp: string;
+  importPath: string;
+  onImport: () => void;
+  onRunNormalize: () => void;
+}) {
   return (
     <div className="grid two">
       <section className="panel">
-        <h2>手动导入</h2>
-        <p className="muted">支持 Markdown、TXT、JSON，写入当前默认来源的导入目录。</p>
-        <button className="primary" onClick={onChoose} disabled={busy}><FolderOpen size={17} /><span>选择文件</span></button>
+        <h2>导入聊天文件</h2>
+        <p className="muted">选择 AI 聊天导出文件（Markdown、TXT、JSON）。导入后会自动标准化并提炼候选知识。</p>
+        <div className="importMeta">
+          <span>当前来源：{sourceApp}</span>
+          <span>保存位置：{importPath}</span>
+        </div>
+        <button className="primary importCta" onClick={onImport} disabled={busy}>
+          <FolderOpen size={17} />
+          <span>{busy ? "正在处理..." : "选择文件并自动处理"}</span>
+        </button>
+        <p className="muted hint">导入完成后，知识会出现在「待确认」页面。</p>
       </section>
       <section className="panel">
-        <h2>标准化</h2>
-        <p className="muted">导入后运行 P1 标准化、归档、SQLite 写入和固定待确认卡片写入。</p>
-        <button className="primary" onClick={onRun} disabled={busy}><Play size={17} /><span>运行导入</span></button>
+        <h2>高级：仅重新标准化</h2>
+        <p className="muted">如果文件已在导入目录但尚未处理，可单独运行标准化（不选文件时使用）。</p>
+        <button onClick={onRunNormalize} disabled={busy}><Play size={17} /><span>仅运行标准化</span></button>
       </section>
     </div>
   );
@@ -1207,7 +1451,12 @@ function LibraryPanel({
               <small>{item.atom.tags.join(", ") || item.atom.evidence}</small>
             </button>
           ))}
-          {filtered.length === 0 && <p className="muted">暂无匹配知识</p>}
+          {filtered.length === 0 && (
+            <div className="emptyState">
+              <p>导入聊天文件后，已批准的知识会出现在这里。</p>
+              <p className="muted">新导入的内容请先前往「待确认」审查。</p>
+            </div>
+          )}
         </div>
       </section>
 
@@ -1445,26 +1694,82 @@ function CommercialPanel({
   );
 }
 
-function PendingPanel({ atoms, counts, query, selectedId, onQuery, onSelect }: { atoms: KnowledgeAtomDocument[]; counts: Record<ReviewStatus, number>; query: string; selectedId: string; onQuery: (value: string) => void; onSelect: (atomId: string) => void }) {
+function PendingPanel({
+  atoms,
+  counts,
+  query,
+  selectedId,
+  onQuery,
+  onSelect
+}: {
+  atoms: KnowledgeAtomDocument[];
+  counts: Record<ReviewStatus, number>;
+  query: string;
+  selectedId: string;
+  onQuery: (value: string) => void;
+  onSelect: (atomId: string) => void;
+}) {
+  const [statusFilter, setStatusFilter] = useState<ReviewStatus>("pending");
+
+  const statusTabs: Array<{ key: ReviewStatus; label: string; count: number }> = [
+    { key: "pending", label: "待确认", count: counts.pending },
+    { key: "approved", label: "已批准", count: counts.approved },
+    { key: "rejected", label: "已拒绝", count: counts.rejected },
+    { key: "merged", label: "已合并", count: counts.merged }
+  ];
+
+  const filteredAtoms = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return atoms.filter((item) => {
+      if (item.atom.review_status !== statusFilter) {
+        return false;
+      }
+      if (!needle) {
+        return true;
+      }
+
+      return [item.atom.title, item.atom.content, item.atom.evidence, item.atom.project, item.atom.tags.join(" ")]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle);
+    });
+  }, [atoms, query, statusFilter]);
+
   return (
     <section className="panel fill">
       <div className="listHeader">
         <div className="statusPills">
-          <span>pending {counts.pending}</span>
-          <span>approved {counts.approved}</span>
-          <span>rejected {counts.rejected}</span>
-          <span>merged {counts.merged}</span>
+          {statusTabs.map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              className={statusFilter === tab.key ? `statusPill active status ${tab.key}` : `statusPill status ${tab.key}`}
+              onClick={() => setStatusFilter(tab.key)}
+            >
+              {tab.label} {tab.count}
+            </button>
+          ))}
         </div>
         <label className="search"><Search size={16} /><input value={query} onChange={(event) => onQuery(event.target.value)} placeholder="搜索标题、正文、证据" /></label>
       </div>
       <div className="atomList">
-        {atoms.map((item) => (
+        {filteredAtoms.map((item) => (
           <button key={item.atom.atom_id} className={selectedId === item.atom.atom_id ? "atomRow active" : "atomRow"} onClick={() => onSelect(item.atom.atom_id)}>
             <strong>{item.atom.title}</strong>
             <span>{item.atom.type} · {item.atom.review_status} · {item.atom.source_app}</span>
             <small>{item.atom.evidence}</small>
           </button>
         ))}
+        {filteredAtoms.length === 0 && (
+          <div className="emptyState">
+            <p>
+              {statusFilter === "pending"
+                ? "导入聊天文件后，候选知识会出现在这里等待你批准或拒绝。"
+                : `当前没有「${statusTabs.find((tab) => tab.key === statusFilter)?.label ?? statusFilter}」状态的知识。`}
+            </p>
+            {statusFilter === "pending" && <p className="muted">点击左侧「导入」，选择文件后会自动提炼。</p>}
+          </div>
+        )}
       </div>
     </section>
   );
@@ -1600,7 +1905,7 @@ function subtitleFor(active: NavKey): string {
   const subtitles: Record<NavKey, string> = {
     guide: "首次启动、知识库位置和运行状态",
     sources: "来源启用状态和后续连接器边界",
-    import: "手动导入本地导出文件",
+    import: "选择 AI 聊天导出文件，系统自动完成后续步骤",
     run: "执行每日沉淀流程",
     library: "搜索、筛选、合并、日历和导出",
     privacy: "来源授权、敏感识别、数据导出和删除",

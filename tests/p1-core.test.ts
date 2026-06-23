@@ -34,6 +34,29 @@ test("normalizeManualImport defaults unknown sensitivity to private and blocks p
   assert.equal(record.can_enter_personal_kb, false);
 });
 
+test("normalizeManualImport can default missing sensitivity to personal for UI manual import", () => {
+  const document: RawSourceDocument = {
+    source_app: "codex",
+    source_type: "manual_export",
+    raw_path: "raw/imports/codex/personal-default.json",
+    raw_source: "unit_test",
+    detected_at: "2026-06-23T00:00:00.000Z",
+    content_type: "json",
+    content: JSON.stringify({
+      conversation_id: "personal-default",
+      user_message: "用户主动导入的文件。",
+      ai_message: "应进入个人知识库。"
+    })
+  };
+
+  const [record] = normalizeManualImport(document, "2026-06-23T00:00:00.000Z", {
+    defaultSensitivityWhenMissing: "personal"
+  });
+  assert.ok(record);
+  assert.equal(record.sensitivity, "personal");
+  assert.equal(record.can_enter_personal_kb, true);
+});
+
 test("runManualImportNormalization archives raw files, writes SQLite records, pending cards and daily run", async () => {
   const vaultRoot = await createTempVault();
   await writeCodexSamples(vaultRoot);
@@ -115,6 +138,29 @@ test("runManualImportNormalization archives raw files, writes SQLite records, pe
 
   assert.equal(secondSummary.generated_atom_count, 2);
   assert.equal(inboxFilesAfterSecondRun.length, 2);
+});
+
+test("rebuildLocalIndexes skips Obsidian _index.md without YAML front matter", async () => {
+  const vaultRoot = await createTempVault();
+  await writeCodexSamples(vaultRoot);
+  await runManualImportNormalization({
+    vault_root: vaultRoot,
+    source_app: "codex",
+    run_id: "run_p1_index_skip"
+  });
+
+  const knowledgeDir = path.join(vaultRoot, "knowledge");
+  await mkdir(knowledgeDir, { recursive: true });
+  await writeFile(path.join(knowledgeDir, "_index.md"), `# Knowledge Index
+
+Updated at: 2026-06-23T00:00:00.000Z
+
+## Pending
+- [[inbox/sample]] 示例条目
+`, "utf8");
+
+  const rebuildSummary = await rebuildLocalIndexes({ vault_root: vaultRoot });
+  assert.equal(rebuildSummary.knowledge_atom_count, 2);
 });
 
 test("log sanitization and safe title formatting stay stable", () => {
