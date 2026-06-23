@@ -10,6 +10,7 @@ import type {
 } from "../schemas";
 import {
   buildKnowledgeAtomMarkdownDocument,
+  directoryForReviewStatus,
   LocalStorageProvider,
   resolveVaultPath,
   toVaultRelativePath
@@ -44,6 +45,11 @@ const KNOWLEDGE_DIRS = [
 ] as const;
 
 export async function listKnowledgeAtomDocuments(vaultRoot: string): Promise<KnowledgeAtomDocument[]> {
+  const documents = await listAllKnowledgeAtomDocuments(vaultRoot);
+  return dedupeKnowledgeAtomDocuments(documents);
+}
+
+async function listAllKnowledgeAtomDocuments(vaultRoot: string): Promise<KnowledgeAtomDocument[]> {
   const documents: KnowledgeAtomDocument[] = [];
 
   for (const dir of KNOWLEDGE_DIRS) {
@@ -57,19 +63,51 @@ export async function listKnowledgeAtomDocuments(vaultRoot: string): Promise<Kno
   return documents.sort((left, right) => right.atom.updated_at.localeCompare(left.atom.updated_at));
 }
 
+export function dedupeKnowledgeAtomDocuments(documents: KnowledgeAtomDocument[]): KnowledgeAtomDocument[] {
+  const grouped = new Map<StableId, KnowledgeAtomDocument[]>();
+  for (const document of documents) {
+    const current = grouped.get(document.atom.atom_id) ?? [];
+    current.push(document);
+    grouped.set(document.atom.atom_id, current);
+  }
+
+  return [...grouped.values()]
+    .map((items) => pickCanonicalKnowledgeAtomDocument(items))
+    .sort((left, right) => right.atom.updated_at.localeCompare(left.atom.updated_at));
+}
+
+export function pickCanonicalKnowledgeAtomDocument(documents: KnowledgeAtomDocument[]): KnowledgeAtomDocument {
+  const matchingDirectory = documents.filter((document) =>
+    matchesReviewStatusDirectory(document.file_path, document.atom.review_status)
+  );
+  const pool = matchingDirectory.length > 0 ? matchingDirectory : documents;
+  return [...pool].sort((left, right) => right.atom.updated_at.localeCompare(left.atom.updated_at))[0]!;
+}
+
 export async function getKnowledgeAtomDocument(
   vaultRoot: string,
   atomId: StableId
 ): Promise<KnowledgeAtomDocument | null> {
-  const documents = await listKnowledgeAtomDocuments(vaultRoot);
-  return documents.find((document) => document.atom.atom_id === atomId) ?? null;
+  const documents = await listAllKnowledgeAtomDocuments(vaultRoot);
+  const matches = documents.filter((document) => document.atom.atom_id === atomId);
+  if (matches.length === 0) {
+    return null;
+  }
+
+  return pickCanonicalKnowledgeAtomDocument(matches);
 }
 
 export async function updateKnowledgeAtomReview(input: KnowledgeAtomReviewInput): Promise<KnowledgeReviewResult> {
-  const current = await getKnowledgeAtomDocument(input.vault_root, input.atom_id);
-  if (!current) {
+  const allDocuments = await listAllKnowledgeAtomDocuments(input.vault_root);
+  const matches = allDocuments.filter((document) => document.atom.atom_id === input.atom_id);
+  if (matches.length === 0) {
     throw new Error(`Knowledge atom not found: ${input.atom_id}`);
   }
+
+  const current = pickCanonicalKnowledgeAtomDocument(matches);
+  const stalePaths = matches
+    .map((document) => document.file_path)
+    .filter((filePath, index, items) => items.indexOf(filePath) === index);
 
   const now = new Date().toISOString();
   const nextAtom: KnowledgeAtom = {
@@ -95,13 +133,18 @@ export async function updateKnowledgeAtomReview(input: KnowledgeAtomReviewInput)
 
   try {
     await storage.writeKnowledgeAtom(document);
-    if (current.file_path !== document.file_path) {
-      await unlink(resolveVaultPath(input.vault_root, current.file_path)).catch((error: unknown) => {
+    const pathsToDelete = new Set(stalePaths);
+    pathsToDelete.delete(document.file_path);
+    for (const stalePath of pathsToDelete) {
+      await unlink(resolveVaultPath(input.vault_root, stalePath)).catch((error: unknown) => {
         if (!isMissingFileError(error)) {
           throw error;
         }
       });
     }
+
+    const refreshedDocuments = dedupeKnowledgeAtomDocuments(await listAllKnowledgeAtomDocuments(input.vault_root));
+    await storage.writeKnowledgeAtomIndex(refreshedDocuments.map((item) => item.atom));
   } finally {
     storage.close();
   }
@@ -191,4 +234,9 @@ function extractContentSection(body: string): string {
 
 function isMissingFileError(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
+}
+
+function matchesReviewStatusDirectory(filePath: VaultRelativePath, status: ReviewStatus): boolean {
+  const directory = directoryForReviewStatus(status);
+  return filePath.startsWith(`knowledge/${directory}/`);
 }

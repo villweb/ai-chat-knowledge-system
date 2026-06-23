@@ -944,6 +944,45 @@ function App() {
     return message;
   }
 
+  async function handleAtomReview(input: AtomUpdateInput) {
+    setBusy(true);
+    setNotice("");
+    setNoticeKind("info");
+    const reviewedAtomId = input.atom_id;
+    const pendingIdsBefore = (state?.atoms ?? [])
+      .filter((item) => item.atom.review_status === "pending")
+      .map((item) => item.atom.atom_id);
+    const currentPendingIndex = pendingIdsBefore.indexOf(reviewedAtomId);
+
+    try {
+      await desktopApi.updateAtom(input);
+      setImportBatchAtomIds((previous) => previous.filter((id) => id !== reviewedAtomId));
+      const nextState = await desktopApi.getState() as DesktopState;
+      setState(nextState);
+
+      const freshPending = nextState.atoms
+        .filter((item) => item.atom.review_status === "pending")
+        .map((item) => item.atom.atom_id);
+      const reviewLabel = reviewStatusLabel(input.review_status);
+
+      if (freshPending.length > 0) {
+        const nextPendingId = freshPending[Math.min(Math.max(currentPendingIndex, 0), freshPending.length - 1)] ?? freshPending[0]!;
+        setSelectedId(nextPendingId);
+        setActive("detail");
+        setNotice(`${reviewLabel}，继续下一条待确认（剩余 ${freshPending.length} 条）。`);
+      } else {
+        setSelectedId("");
+        setActive("pending");
+        setNotice(`${reviewLabel}，全部待确认已处理完毕。`);
+      }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+      setNoticeKind("error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function withBusy(action: () => Promise<unknown>, successMessage: string, kind: "info" | "error" = "info") {
     setBusy(true);
     setNotice("");
@@ -1142,7 +1181,15 @@ function App() {
             onClearImportBatch={() => setImportBatchAtomIds([])}
           />
         )}
-        {active === "detail" && selected && <DetailPanel document={selected} atoms={state.atoms} busy={busy} onUpdate={(input) => withBusy(() => desktopApi.updateAtom(input), "知识已更新")} />}
+        {active === "detail" && selected && (
+          <DetailPanel
+            document={selected}
+            atoms={state.atoms}
+            busy={busy}
+            onUpdate={(input) => withBusy(() => desktopApi.updateAtom(input), "知识已更新")}
+            onReview={(input) => void handleAtomReview(input)}
+          />
+        )}
         {active === "settings" && <SettingsPanel state={state} busy={busy} onSave={(input) => withBusy(() => desktopApi.saveSessionConfig(input), "会话配置已保存")} onCheckUpdates={() => withBusy(() => desktopApi.checkForUpdates(), "更新检查完成")} />}
         {active === "logs" && <LogsPanel logs={[...state.events, ...state.logs]} />}
       </section>
@@ -1838,7 +1885,19 @@ function PendingPanel({
   );
 }
 
-function DetailPanel({ document, atoms, busy, onUpdate }: { document: KnowledgeAtomDocument; atoms: KnowledgeAtomDocument[]; busy: boolean; onUpdate: (input: AtomUpdateInput) => void }) {
+function DetailPanel({
+  document,
+  atoms,
+  busy,
+  onUpdate,
+  onReview
+}: {
+  document: KnowledgeAtomDocument;
+  atoms: KnowledgeAtomDocument[];
+  busy: boolean;
+  onUpdate: (input: AtomUpdateInput) => void;
+  onReview: (input: AtomUpdateInput) => void;
+}) {
   const [title, setTitle] = useState(document.atom.title);
   const [type, setType] = useState<KnowledgeAtomType>(document.atom.type);
   const [content, setContent] = useState(document.atom.content);
@@ -1874,9 +1933,9 @@ function DetailPanel({ document, atoms, busy, onUpdate }: { document: KnowledgeA
       <div className="evidence"><strong>证据</strong><p>{document.atom.evidence}</p><small>{document.atom.source_raw_paths.join(", ")}</small></div>
       <div className="actions">
         <button onClick={() => onUpdate(baseInput)} disabled={busy}><SquarePen size={16} />保存</button>
-        <button onClick={() => onUpdate({ ...baseInput, review_status: "approved" })} disabled={busy}><Check size={16} />批准</button>
-        <button onClick={() => onUpdate({ ...baseInput, review_status: "rejected" })} disabled={busy}><X size={16} />拒绝</button>
-        <button onClick={() => onUpdate({ ...baseInput, review_status: "merged", merged_into: mergedInto })} disabled={busy || !mergedInto}><Split size={16} />合并</button>
+        <button onClick={() => onReview({ ...baseInput, review_status: "approved" })} disabled={busy}><Check size={16} />批准</button>
+        <button onClick={() => onReview({ ...baseInput, review_status: "rejected" })} disabled={busy}><X size={16} />拒绝</button>
+        <button onClick={() => onReview({ ...baseInput, review_status: "merged", merged_into: mergedInto })} disabled={busy || !mergedInto}><Split size={16} />合并</button>
       </div>
     </section>
   );
@@ -1958,6 +2017,19 @@ function EventList({ events }: { events: LogEvent[] }) {
 
 function Metric({ label, value }: { label: string; value: number }) {
   return <div className="metric"><span>{label}</span><strong>{value}</strong></div>;
+}
+
+function reviewStatusLabel(status?: ReviewStatus): string {
+  switch (status) {
+    case "approved":
+      return "已批准";
+    case "rejected":
+      return "已拒绝";
+    case "merged":
+      return "已合并";
+    default:
+      return "知识已更新";
+  }
 }
 
 function titleFor(active: NavKey): string {
