@@ -669,6 +669,170 @@ nav {
   margin-top: 12px;
 }
 
+.hintText {
+  margin: 4px 0 10px;
+  color: #64736e;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.sectionHeadingWrap {
+  margin-bottom: 14px;
+}
+
+.sectionHeadingWrap .sectionHeading {
+  margin: 0;
+}
+
+.sectionHeadingWrap .hintText {
+  margin: 6px 0 0;
+}
+
+.sectionHeading {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 14px;
+  color: #17221f;
+  font-size: 17px;
+  font-weight: 720;
+}
+
+.helpTip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+.helpTipIcon {
+  display: grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  border-radius: 999px;
+  background: #e8eeeb;
+  color: #4a5c56;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+}
+
+.helpTipBubble {
+  position: absolute;
+  z-index: 20;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 280px;
+  padding: 8px 10px;
+  border: 1px solid #cfd9d4;
+  border-radius: 8px;
+  background: #17221f;
+  color: #f3f7f4;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+  white-space: normal;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.12s ease, visibility 0.12s ease;
+}
+
+.helpTipBubble::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: #17221f;
+}
+
+.helpTip:hover .helpTipBubble,
+.helpTip:focus-visible .helpTipBubble {
+  opacity: 1;
+  visibility: visible;
+}
+
+.firstTimeBanner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid #b9dcc4;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #f4fbf6 0%, #ffffff 100%);
+  color: #1d4f38;
+}
+
+.firstTimeBannerBody {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.firstTimeBannerBody strong {
+  display: block;
+  margin-bottom: 4px;
+  color: #17221f;
+  font-size: 14px;
+}
+
+.firstTimeBannerClose {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+}
+
+.labelWithHelp {
+  display: grid;
+  gap: 4px;
+}
+
+.labelWithHelp > span:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.buttonHintWrap {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+}
+
+.runNextSteps {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #b9dcc4;
+  border-radius: 8px;
+  background: #f4fbf6;
+  color: #2d5a45;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.runOptionalNote {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border: 1px dashed #d5dedb;
+  border-radius: 8px;
+  background: #fafcfb;
+  color: #64736e;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .emptyState {
   display: grid;
   gap: 8px;
@@ -1103,6 +1267,99 @@ nav {
 
 .runActions {
   margin-top: 14px;
+}
+
+.runSectionTitle {
+  margin: 16px 0 8px;
+  font-size: 14px;
+  color: #17221f;
+}
+
+.runWhenList {
+  margin: 0 0 14px;
+  padding-left: 18px;
+  color: #3f4f49;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.runWhenList li + li {
+  margin-top: 4px;
+}
+
+.runWhenSkip {
+  color: #6a7772;
+}
+
+.runResultCard {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid #b9dcc4;
+  border-radius: 8px;
+  background: #f4fbf6;
+}
+
+.runResultCard strong {
+  color: #1d4f38;
+  font-size: 14px;
+}
+
+.runResultMetrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.runResultLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.runResultLinks button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid #d7dfdc;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #17221f;
+  font-size: 13px;
+}
+
+.runAdvanced {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid #e6ece9;
+}
+
+.runAdvanced summary {
+  cursor: pointer;
+  color: #55645f;
+  font-size: 13px;
+}
+
+.automationIdleNotice {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border: 1px solid #e6ece9;
+  border-radius: 8px;
+  background: #f7f9f8;
+  color: #55645f;
+  font-size: 13px;
+}
+
+.automationEnabledNotice {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border: 1px solid #b9dcc4;
+  border-radius: 8px;
+  background: #f4fbf6;
+  color: #2d5a45;
+  font-size: 13px;
 }
 
 .actions button {

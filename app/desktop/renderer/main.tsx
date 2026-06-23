@@ -34,6 +34,7 @@ import {
   X
 } from "lucide-react";
 import "./styles.css";
+import { FirstTimeBanner, HelpTip, HintText, SectionHeading } from "./help-components";
 
 type ReviewStatus = "pending" | "approved" | "rejected" | "merged";
 type KnowledgeAtomType = "观点" | "方法" | "决策" | "经验" | "素材" | "问题" | "偏好";
@@ -216,6 +217,12 @@ interface ImportResult {
   import_batch_record_ids?: string[];
 }
 
+interface DailyRunResult {
+  pending_atom_count?: number;
+  normalized_record_count?: number;
+  generated_atom_count?: number;
+}
+
 interface ReleaseState {
   app_name: string;
   app_id: string;
@@ -363,7 +370,7 @@ const flowJourneySteps = [
   { step: 4, label: "知识库使用", hint: "搜索、导出、同步 Obsidian", why: "已批准的知识在这里长期使用" }
 ];
 
-const flowJourneyPageKeys: NavKey[] = ["import", "pending", "library", "detail"];
+const flowJourneyPageKeys: NavKey[] = ["import", "run", "pending", "library", "detail"];
 
 const navItems: Array<{ key: NavKey; label: string; icon: React.ComponentType<{ size?: number }> }> = [
   { key: "guide", label: "引导", icon: BookOpenCheck },
@@ -471,7 +478,12 @@ function getDesktopApi(): DesktopApi {
       return { ok: true };
     },
     async runDaily() {
-      return { ok: true };
+      const pendingCount = previewState.atoms.filter((item) => item.atom.review_status === "pending").length;
+      return {
+        normalized_record_count: 1,
+        generated_atom_count: 1,
+        pending_atom_count: pendingCount
+      };
     },
     async listAtoms() {
       return previewState.atoms;
@@ -860,6 +872,7 @@ function App() {
     remainingPending: number;
     nextPendingId: string;
   } | null>(null);
+  const [lastRunResult, setLastRunResult] = useState<DailyRunResult | null>(null);
 
   useEffect(() => {
     void refresh();
@@ -938,7 +951,7 @@ function App() {
     if (active === "pending" || active === "detail") {
       return 3;
     }
-    if (active === "import" && busy) {
+    if (active === "run" || (active === "import" && busy)) {
       return 2;
     }
     if (counts.pending > 0) {
@@ -1078,6 +1091,37 @@ function App() {
     }
   }
 
+  async function handleRunDaily(
+    action: () => Promise<unknown>,
+    options?: { clearNotice?: boolean; successMessage?: string }
+  ) {
+    const clearNotice = options?.clearNotice ?? true;
+    setBusy(true);
+    if (clearNotice) {
+      setNotice("");
+      setNoticeKind("info");
+    }
+    setLastRunResult(null);
+    try {
+      const result = await action() as DailyRunResult;
+      setLastRunResult({
+        normalized_record_count: result.normalized_record_count ?? 0,
+        generated_atom_count: result.generated_atom_count ?? 0,
+        pending_atom_count: result.pending_atom_count ?? 0
+      });
+      if (options?.successMessage) {
+        setNotice(options.successMessage);
+        setNoticeKind("info");
+      }
+      await refresh();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+      setNoticeKind("error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function withBusy(action: () => Promise<unknown>, successMessage: string, kind: "info" | "error" = "info") {
     setBusy(true);
     setNotice("");
@@ -1183,7 +1227,12 @@ function App() {
           <div className="topbarActions">
             <PipelineStatusBar pipeline={pipeline} pendingCount={counts.pending} />
             {counts.pending > 0 && active !== "pending" && (
-              <button className="primary nextAction" onClick={() => setActive("pending")} disabled={busy}>
+              <button
+                className="primary nextAction"
+                onClick={() => setActive("pending")}
+                disabled={busy}
+                title="审查 AI 生成的候选知识，批准后才进入正式库"
+              >
                 <ListChecks size={16} />
                 <span>去审查待确认知识</span>
                 <span className="navBadge">{counts.pending}</span>
@@ -1251,11 +1300,15 @@ function App() {
             busy={busy}
             events={state.events}
             automation={state.automation}
-            onRun={() => withBusy(() => desktopApi.runDaily(), "每日沉淀完成")}
-            onSaveAutomation={(input) => withBusy(() => desktopApi.saveAutomationSettings(input), "每日自动化设置已保存")}
-            onConfirmAutomation={() => withBusy(() => desktopApi.confirmAutomationRun(), "自动运行已确认")}
+            lastRunResult={lastRunResult}
+            onRun={() => handleRunDaily(() => desktopApi.runDaily())}
+            onSaveAutomation={(input) => withBusy(() => desktopApi.saveAutomationSettings(input), "定时自动沉淀设置已保存")}
+            onConfirmAutomation={() => handleRunDaily(() => desktopApi.confirmAutomationRun(), { clearNotice: false })}
             onSkipAutomation={() => withBusy(() => desktopApi.skipAutomationRun(), "已跳过本次自动运行")}
-            onRerunDate={(runDate) => withBusy(() => desktopApi.rerunAutomationDate({ run_date: runDate }), "指定日期已重新运行")}
+            onRerunDate={(runDate) => handleRunDaily(() => desktopApi.rerunAutomationDate({ run_date: runDate }))}
+            onGoPending={() => setActive("pending")}
+            onGoLibrary={() => goToLibrary()}
+            onGoLogs={() => setActive("logs")}
           />
         )}
         {active === "library" && (
@@ -1496,7 +1549,15 @@ function GuidePanel({
 function SourcesPanel({ connectors, sourceApp, busy, onToggle }: { connectors: SourceConnectorView[]; sourceApp: string; busy: boolean; onToggle: (sourceApp: string, enabled: boolean) => void }) {
   return (
     <section className="panel">
-      <h2>来源管理</h2>
+      <FirstTimeBanner section="sources">
+        <strong>来源管理</strong>
+        控制各 AI 聊天平台的导入入口是否启用；停用后不会读取对应目录。
+      </FirstTimeBanner>
+      <SectionHeading
+        title="来源管理"
+        hint="启用后可在「导入」页选择对应平台的导出文件；预留来源尚未开放。"
+        help="每个来源对应 raw/imports 下的子目录，只读取你手动放入的文件。"
+      />
       <div className="sourceTable">
         {connectors.map((connector) => (
           <div className="sourceRow" key={connector.source_app}>
@@ -1558,15 +1619,22 @@ function ImportPanel({
   return (
     <div className="grid two">
       <section className="panel">
+        <FirstTimeBanner section="import">
+          <strong>第一步：导入你的对话或随笔文件</strong>
+          选择 AI 聊天导出文件后，系统会自动标准化、提炼候选知识，并进入「待确认」等你审查。
+        </FirstTimeBanner>
         {isEmptyVault && !productGuideDismissed && <ProductGuideCard onDismiss={onDismissProductGuide} />}
-        <h2>导入聊天文件</h2>
+        <SectionHeading
+          title="导入聊天文件"
+          hint="选择导出文件后自动完成标准化与 AI 提炼，无需再去「运行」页手动触发。"
+          help="支持 Markdown、TXT、JSON 格式的 AI 聊天导出文件。"
+        />
         <p className="panelPurpose">导入后 AI 会生成候选，你确认后进入知识库永久保存。</p>
-        <p className="muted">选择 AI 聊天导出文件（Markdown、TXT、JSON）。导入后会自动标准化并提炼候选知识。</p>
         {isFixtureProvider(aiProvider) ? (
           <div className="importAiNotice warning">
             <strong>当前为测试模式</strong>
             <span>不会调用 DeepSeek 等外部 API。待确认内容来自本地占位/模板，非真实 AI 提炼。</span>
-            <button className="secondary" onClick={onGoSettings} disabled={busy}><Settings size={16} />配置真实 AI</button>
+            <button className="secondary" onClick={onGoSettings} disabled={busy} title="前往设置切换为真实 AI API"><Settings size={16} />配置真实 AI</button>
           </div>
         ) : (
           <div className="importAiNotice ok">
@@ -1578,21 +1646,82 @@ function ImportPanel({
           <span>当前来源：{sourceApp}</span>
           <span>保存位置：{importPath}</span>
         </div>
-        <button className="primary importCta" onClick={onImport} disabled={busy}>
-          <FolderOpen size={17} />
-          <span>{busy ? "正在处理..." : "选择文件并自动处理"}</span>
-        </button>
-        <p className="muted hint">导入完成后，候选知识会进入「待确认」等你审查；批准后可在「知识库」搜索使用。</p>
+        <div className="buttonHintWrap">
+          <div className="importCtaRow">
+            <button
+              className="primary importCta"
+              onClick={onImport}
+              disabled={busy}
+              title="选择文件后自动复制到导入目录、标准化记录、AI 提炼候选，并跳转到待确认"
+            >
+              <FolderOpen size={17} />
+              <span>{busy ? "正在处理..." : "选择文件并自动处理"}</span>
+            </button>
+            <HelpTip title="一键完成导入全流程" detail="复制文件、标准化、AI 提炼候选。完成后请到「待确认」逐条审查。" />
+          </div>
+          <HintText>自动执行：复制到导入目录 → 标准化 → AI 提炼 → 进入「待确认」</HintText>
+        </div>
         <div className="importFlowLinks">
-          <button type="button" onClick={onGoPending} disabled={busy}><ListChecks size={15} />去待确认</button>
-          <button type="button" onClick={onGoLibrary} disabled={busy}><BookOpenCheck size={15} />去知识库</button>
+          <button type="button" onClick={onGoPending} disabled={busy} title="查看 AI 生成的候选知识并审查"><ListChecks size={15} />去待确认</button>
+          <button type="button" onClick={onGoLibrary} disabled={busy} title="搜索、导出已批准的知识"><BookOpenCheck size={15} />去知识库</button>
         </div>
       </section>
       <section className="panel">
-        <h2>高级：仅重新标准化</h2>
-        <p className="muted">如果文件已在导入目录但尚未处理，可单独运行标准化（不选文件时使用）。</p>
-        <button onClick={onRunNormalize} disabled={busy}><Play size={17} /><span>仅运行标准化</span></button>
+        <SectionHeading
+          title="高级：仅重新标准化"
+          hint="文件已在导入目录但未处理时使用，不会重新选文件。"
+          help="只运行 P1 标准化，不触发 AI 提炼。一般导入按钮已包含此步骤。"
+        />
+        <button onClick={onRunNormalize} disabled={busy} title="对导入目录中已有文件重新运行标准化"><Play size={17} /><span>仅运行标准化</span></button>
       </section>
+    </div>
+  );
+}
+
+function RunResultCard({
+  result,
+  onGoPending,
+  onGoLibrary,
+  onGoLogs
+}: {
+  result: DailyRunResult;
+  onGoPending: () => void;
+  onGoLibrary: () => void;
+  onGoLogs: () => void;
+}) {
+  const normalized = result.normalized_record_count ?? 0;
+  const pending = result.pending_atom_count ?? 0;
+  const generated = result.generated_atom_count ?? 0;
+
+  return (
+    <div className="runResultCard">
+      <strong>本次运行完成</strong>
+      <div className="runResultMetrics">
+        <Metric label="标准化" value={normalized} />
+        <Metric label="待确认" value={pending} />
+      </div>
+      {pending > 0 ? (
+        <>
+          <p className="muted">已生成 {generated} 条候选知识，请去「待确认」逐条审查。</p>
+          <button className="primary" onClick={onGoPending}><ListChecks size={16} />去待确认审查</button>
+        </>
+      ) : normalized === 0 && generated === 0 ? (
+        <>
+          <p className="muted">导入目录里没有需要处理的新文件。若你刚导入过，流程已在导入时自动跑完。</p>
+          <div className="runResultLinks">
+            <button type="button" onClick={onGoLibrary}><BookOpenCheck size={15} />去知识库</button>
+            <button type="button" onClick={onGoLogs}><Archive size={15} />查看日志</button>
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="muted">没有新的待确认条目。可能内容已入库，或本次仅完成标准化未产生候选。</p>
+          <div className="runResultLinks">
+            <button type="button" onClick={onGoLibrary}><BookOpenCheck size={15} />去知识库</button>
+            <button type="button" onClick={onGoLogs}><Archive size={15} />查看日志</button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -1601,20 +1730,28 @@ function RunPanel({
   busy,
   events,
   automation,
+  lastRunResult,
   onRun,
   onSaveAutomation,
   onConfirmAutomation,
   onSkipAutomation,
-  onRerunDate
+  onRerunDate,
+  onGoPending,
+  onGoLibrary,
+  onGoLogs
 }: {
   busy: boolean;
   events: LogEvent[];
   automation: DailyAutomationState;
+  lastRunResult: DailyRunResult | null;
   onRun: () => void;
   onSaveAutomation: (input: Partial<DailyAutomationSettings>) => void;
   onConfirmAutomation: () => void;
   onSkipAutomation: () => void;
   onRerunDate: (runDate: string) => void;
+  onGoPending: () => void;
+  onGoLibrary: () => void;
+  onGoLogs: () => void;
 }) {
   const [settings, setSettings] = useState(automation.settings);
   const [rerunDate, setRerunDate] = useState(automation.decision.run_date);
@@ -1629,35 +1766,93 @@ function RunPanel({
   }
 
   return (
-    <div className="grid twoWide">
-      <section className="panel">
-        <h2>每日运行</h2>
-        <p className="muted">串联导入、标准化、P2 候选提炼和每日摘要。</p>
-        <div className="actions runActions">
-          <button className="primary" onClick={onRun} disabled={busy}><Play size={17} />立即运行</button>
-          <button onClick={() => onRerunDate(rerunDate)} disabled={busy || !rerunDate}><CalendarClock size={16} />重跑日期</button>
+    <div className="grid twoWide runLayout">
+      <section className="panel runMainPanel">
+        <FirstTimeBanner section="run">
+          <strong>运行页：批量处理与定时任务</strong>
+          若你已在「导入」页用按钮导入过，通常不需要来这里。此页适合：文件已放入目录但未走导入按钮、或需要定时自动沉淀。
+        </FirstTimeBanner>
+        <SectionHeading
+          title="每日运行"
+          hint="批量处理导入目录中的文件，或配合右侧定时任务自动沉淀。"
+          help="与「导入」页的手动选文件互补：导入按钮会立即处理所选文件；此页处理目录中所有待处理文件。"
+        />
+
+        <h3 className="runSectionTitle">什么时候需要点这里？<HelpTip title="使用场景" detail="刚用导入按钮处理过则无需再来；适合丢文件进目录后统一处理或开启定时任务。" /></h3>
+        <ul className="runWhenList">
+          <li>你已经把文件放进 raw/imports，但没有走「导入」页的按钮</li>
+          <li>你想手动重跑全部待处理文件</li>
+          <li>你开启了定时自动沉淀</li>
+          <li className="runWhenSkip">不需要：刚用「选择文件并自动处理」导入过（已经跑过了）</li>
+        </ul>
+
+        <div className="buttonHintWrap">
+          <button
+            className="primary importCta"
+            onClick={onRun}
+            disabled={busy}
+            title="立即处理导入目录中所有新文件，生成候选后去「待确认」审查"
+          >
+            <Play size={17} />
+            <span>{busy ? "正在处理..." : "立即运行"}</span>
+          </button>
+          <HintText>现在处理导入目录里所有新文件；完成后去「待确认」逐条审查</HintText>
         </div>
-        <label className="fullField compactField">重跑日期<input type="date" value={rerunDate} onChange={(event) => setRerunDate(event.target.value)} /></label>
+
+        {lastRunResult && (
+          <RunResultCard
+            result={lastRunResult}
+            onGoPending={onGoPending}
+            onGoLibrary={onGoLibrary}
+            onGoLogs={onGoLogs}
+          />
+        )}
+
+        <details className="runAdvanced">
+          <summary>高级：重跑指定日期</summary>
+          <p className="muted">用于补跑某一天的历史记录，一般不需要。</p>
+          <div className="actions">
+            <label className="fullField compactField">重跑日期<input type="date" value={rerunDate} onChange={(event) => setRerunDate(event.target.value)} /></label>
+            <button onClick={() => onRerunDate(rerunDate)} disabled={busy || !rerunDate}><CalendarClock size={16} />重跑日期</button>
+          </div>
+        </details>
+      </section>
+
+      <section className="panel">
+        <SectionHeading
+          title="定时自动沉淀（可选）"
+          hint="每天固定时间在电脑空闲时自动处理导入目录；与手动导入互补。"
+          help="开启后到达设定时间且电脑空闲时会自动运行；可要求运行前确认。"
+        />
+        {!settings.enabled ? (
+          <p className="automationIdleNotice">当前未开启，不影响日常使用</p>
+        ) : (
+          <p className="automationEnabledNotice">已开启：每天 {settings.run_time_local} 起，在电脑空闲时自动处理导入目录</p>
+        )}
+        <p className="muted">
+          与「导入」页的手动选文件是补充关系：你可以平时手动导入，也可以把文件丢进目录后靠定时任务统一处理。
+        </p>
+        {settings.enabled && settings.require_confirmation && (
+          <p className="muted">到达设定时间且电脑空闲时，本页会出现「等待确认」提示，并可能发送系统通知；你确认后才会开始处理。</p>
+        )}
         {automation.pending_run && (
           <div className="pendingAutomation">
             <strong>等待确认：{automation.pending_run.run_date}</strong>
             <span>{automation.pending_run.reason}</span>
             <div className="actions">
-              <button className="primary" onClick={onConfirmAutomation} disabled={busy}><Check size={16} />确认运行</button>
-              <button onClick={onSkipAutomation} disabled={busy}><X size={16} />跳过本次</button>
+              <button className="primary" onClick={onConfirmAutomation} disabled={busy} title="确认后开始本次定时沉淀任务"><Check size={16} />确认运行</button>
+              <button onClick={onSkipAutomation} disabled={busy} title="跳过本次定时任务，等待下一次"><X size={16} />跳过本次</button>
             </div>
           </div>
         )}
-        <div className="automationStatus">
-          <Clock size={16} />
-          <span>{automation.decision.reason}</span>
-        </div>
-      </section>
-
-      <section className="panel">
-        <h2>自动化设置</h2>
+        {settings.enabled && !automation.pending_run && (
+          <div className="automationStatus">
+            <Clock size={16} />
+            <span>{automation.decision.reason}</span>
+          </div>
+        )}
         <div className="formGrid">
-          <label>启用自动运行<select value={settings.enabled ? "yes" : "no"} onChange={(event) => updateSetting("enabled", event.target.value === "yes")}><option value="no">关闭</option><option value="yes">开启</option></select></label>
+          <label>启用定时任务<select value={settings.enabled ? "yes" : "no"} onChange={(event) => updateSetting("enabled", event.target.value === "yes")}><option value="no">关闭</option><option value="yes">开启</option></select></label>
           <label>运行时间<input type="time" value={settings.run_time_local} onChange={(event) => updateSetting("run_time_local", event.target.value)} /></label>
           <label>仅空闲时运行<select value={settings.only_when_idle ? "yes" : "no"} onChange={(event) => updateSetting("only_when_idle", event.target.value === "yes")}><option value="yes">开启</option><option value="no">关闭</option></select></label>
           <label>空闲秒数<input type="number" min="0" value={settings.idle_threshold_seconds} onChange={(event) => updateSetting("idle_threshold_seconds", Number(event.target.value))} /></label>
@@ -1666,7 +1861,7 @@ function RunPanel({
           <label>重试次数<input type="number" min="0" value={settings.retry_count} onChange={(event) => updateSetting("retry_count", Number(event.target.value))} /></label>
           <label>重试间隔分钟<input type="number" min="0" value={settings.retry_delay_minutes} onChange={(event) => updateSetting("retry_delay_minutes", Number(event.target.value))} /></label>
         </div>
-        <button className="primary" onClick={() => onSaveAutomation(settings)} disabled={busy}><Bell size={17} /><span>保存自动化</span></button>
+        <button className="primary" onClick={() => onSaveAutomation(settings)} disabled={busy} title="保存定时任务的所有配置项"><Bell size={17} /><span>保存定时设置</span></button>
       </section>
 
       <section className="panel">
@@ -1746,12 +1941,19 @@ function LibraryPanel({
   return (
     <div className="libraryLayout">
       <section className="panel">
-        <h2>知识库</h2>
-        <p className="panelPurpose">已批准的知识都在这里，可搜索、导出、同步 Obsidian。</p>
+        <FirstTimeBanner section="library">
+          <strong>知识库：已批准知识的长期存放处</strong>
+          在这里搜索、筛选、导出 Markdown、同步 Obsidian。新导入的内容需先在「待确认」批准才会出现。
+        </FirstTimeBanner>
+        <SectionHeading
+          title="知识库"
+          hint="仅包含你已批准的知识；候选内容在「待确认」页审查通过后才入库。"
+          help="支持全文搜索、按来源/类型/标签筛选，以及导出和 Obsidian 索引。"
+        />
         {showRecentHighlight && (
           <div className="libraryRecentBar">
             <span>正在高亮刚批准的知识</span>
-            <button type="button" onClick={onClearFocus}>显示全部</button>
+            <button type="button" onClick={onClearFocus} title="取消高亮，显示全部知识">显示全部</button>
           </div>
         )}
         <div className="listHeader">
@@ -2346,7 +2548,7 @@ function subtitleFor(active: NavKey): string {
     guide: "首次启动、知识库位置和运行状态",
     sources: "来源启用状态和后续连接器边界",
     import: "导入对话，AI 提炼候选后等你确认",
-    run: "执行每日沉淀流程",
+    run: "批量处理已放入导入目录的文件，或按日程自动沉淀",
     library: "已批准知识可搜索、导出、同步 Obsidian",
     privacy: "来源授权、敏感识别、数据导出和删除",
     commercial: "试用、授权、购买、更新公告和反馈",

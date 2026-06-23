@@ -268,12 +268,11 @@ function registerIpc() {
   ipcMain.handle("workflow:run-daily", async () => {
     pipelinePhase = "processing";
     try {
-      const { importResult, extractResult } = await runDailyWorkflow();
-      const atoms = await listAtoms();
-      const pendingCount = atoms.filter((item) => item.atom.review_status === "pending").length;
-      pipelinePhase = pendingCount > 0 ? "waiting_review" : "done";
-      pushEvent("daily_run", `每日沉淀完成，${pendingCount} 条知识待确认。`);
-      return { importResult, extractResult, pending_atom_count: pendingCount, pipeline: getPipelineState() };
+      const workflowResult = await runDailyWorkflow();
+      const result = await buildDailyRunResult(workflowResult);
+      pipelinePhase = result.pending_atom_count > 0 ? "waiting_review" : "done";
+      pushEvent("daily_run", `每日沉淀完成，${result.pending_atom_count} 条知识待确认。`);
+      return result;
     } catch (error) {
       pipelinePhase = "idle";
       throw error;
@@ -378,8 +377,16 @@ function registerIpc() {
 
     const runDate = pendingAutomationRun.run_date;
     pendingAutomationRun = null;
-    await runAutomationDate(runDate, "confirmed");
-    return getAutomationState();
+    pipelinePhase = "processing";
+    try {
+      const workflowResult = await runAutomationDate(runDate, "confirmed");
+      const result = await buildDailyRunResult(workflowResult);
+      pipelinePhase = result.pending_atom_count > 0 ? "waiting_review" : "done";
+      return result;
+    } catch (error) {
+      pipelinePhase = "idle";
+      throw error;
+    }
   });
 
   ipcMain.handle("automation:skip-run", async () => {
@@ -398,8 +405,16 @@ function registerIpc() {
       throw new Error("缺少重跑日期。");
     }
 
-    await runAutomationDate(input.run_date, "manual_rerun");
-    return getAutomationState();
+    pipelinePhase = "processing";
+    try {
+      const workflowResult = await runAutomationDate(input.run_date, "manual_rerun");
+      const result = await buildDailyRunResult(workflowResult);
+      pipelinePhase = result.pending_atom_count > 0 ? "waiting_review" : "done";
+      return result;
+    } catch (error) {
+      pipelinePhase = "idle";
+      throw error;
+    }
   });
 
   ipcMain.handle("automation:list-history", async () => listDailyRunHistory());
@@ -918,4 +933,23 @@ function parseScriptStdout(result) {
   } catch {
     return null;
   }
+}
+
+async function buildDailyRunResult(workflowResult) {
+  const { importResult, extractResult } = workflowResult;
+  const atoms = await listAtoms();
+  const pendingCount = atoms.filter((item) => item.atom.review_status === "pending").length;
+  const importSummary = parseScriptStdout(importResult);
+  const extractSummary = parseScriptStdout(extractResult);
+  return {
+    importResult,
+    extractResult,
+    pending_atom_count: pendingCount,
+    normalized_record_count: importSummary?.normalized_record_count ?? 0,
+    generated_atom_count: Math.max(
+      importSummary?.generated_atom_count ?? 0,
+      extractSummary?.generated_atom_count ?? 0
+    ),
+    pipeline: getPipelineState()
+  };
 }
