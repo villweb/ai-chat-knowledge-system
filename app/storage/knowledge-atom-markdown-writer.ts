@@ -99,10 +99,14 @@ ${atom.content}
 - ${atom.created_at.slice(0, 10)}：创建为 ${atom.review_status}。`;
 }
 
-function statusToDirectory(status: ReviewStatus): string {
+export function directoryForReviewStatus(status: ReviewStatus): string {
   if (status === "pending") {
     return "inbox";
   }
 
   return status;
+}
+
+function statusToDirectory(status: ReviewStatus): string {
+  return directoryForReviewStatus(status);
 }

@@ -39,4 +39,6 @@ export interface NormalizedRecordQuery {
   from_time?: IsoDateTimeString;
   to_time?: IsoDateTimeString;
   include_blocked?: boolean;
+  // 仅查询指定标准化记录，用于单次导入后的 P2 提炼
+  record_ids?: StableId[];
 }

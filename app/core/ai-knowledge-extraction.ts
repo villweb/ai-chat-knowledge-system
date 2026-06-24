@@ -29,6 +29,8 @@ export interface ExtractKnowledgeAtomsInput {
   run_id?: string;
   run_date?: string;
   max_records?: number;
+  // 仅提炼指定标准化记录，用于单次导入后的 P2 运行
+  record_ids?: StableId[];
   sqlite_path?: VaultRelativePath;
   knowledge_dir?: VaultRelativePath;
   logs_dir?: VaultRelativePath;
@@ -114,6 +116,7 @@ export async function extractKnowledgeAtoms(
 
     const records = await storage.findNormalizedRecords({
       ...(input.source_app ? { source_app: input.source_app } : {}),
+      ...(input.record_ids && input.record_ids.length > 0 ? { record_ids: input.record_ids } : {}),
       include_blocked: true
     });
     const selectedRecords = records.slice(0, input.max_records ?? 10);
@@ -260,12 +263,14 @@ export function createKnowledgeAtomGenerator(provider: KnowledgeExtractionProvid
 export class FixtureKnowledgeAtomGenerator implements KnowledgeAtomGenerator {
   async generateKnowledgeAtoms(request: KnowledgeAtomGenerationRequest): Promise<KnowledgeAtomDraft[]> {
     return request.records.map((record) => ({
-      title: `AI提炼：${record.topic}`,
+      title: record.ai_excerpt.trim().length > 0 ? `AI提炼：${record.topic}` : `随笔提炼：${record.topic}`,
       type: inferDraftType(record),
-      content: `用户在「${record.topic}」中表达了一个值得沉淀的要点：${record.user_excerpt}`,
+      content: record.ai_excerpt.trim().length > 0
+        ? `用户在「${record.topic}」中表达了一个值得沉淀的要点：${record.user_excerpt}`
+        : `个人随笔「${record.topic}」核心内容：${truncateExcerpt(record.user_excerpt, 800)}`,
       evidence: record.user_excerpt.slice(0, 300),
       source_record_ids: [record.record_id],
-      tags: ["AI提炼", record.source_app],
+      tags: record.ai_excerpt.trim().length > 0 ? ["AI提炼", record.source_app] : ["个人随笔", record.source_app],
       sensitivity: "personal",
       confidence_level: "high"
     }));
@@ -332,6 +337,15 @@ export class OpenAICompatibleKnowledgeAtomGenerator implements KnowledgeAtomGene
     const parsed = JSON.parse(content) as { atoms?: KnowledgeAtomDraft[] };
     return parsed.atoms ?? [];
   }
+}
+
+function truncateExcerpt(value: string, maxLength: number): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, maxLength - 3)}...`;
 }
 
 function inferDraftType(record: AIRecordInput): KnowledgeAtomType {

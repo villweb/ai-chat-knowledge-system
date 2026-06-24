@@ -310,6 +310,267 @@ nav {
   background: linear-gradient(180deg, #f7fbf8 0%, #ffffff 100%);
 }
 
+.flowJourneyStrip {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid #cfe0d8;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #f7fbf8 0%, #ffffff 100%);
+}
+
+.flowJourneySteps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.flowJourneyStep {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #dce3e0;
+  border-radius: 8px;
+  background: #ffffff;
+  opacity: 0.72;
+  text-align: left;
+  cursor: pointer;
+}
+
+.flowJourneyStep.active {
+  border-color: #8fbea3;
+  background: #f4fbf6;
+  opacity: 1;
+}
+
+.flowJourneyStep.done {
+  opacity: 0.9;
+}
+
+.flowJourneyStep strong,
+.flowJourneyStep small {
+  display: block;
+}
+
+.flowJourneyStep strong {
+  color: #17221f;
+  font-size: 12px;
+}
+
+.flowJourneyStep small {
+  margin-top: 3px;
+  color: #64736e;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.flowJourneyStep.active .stepNumber {
+  background: #23724f;
+  color: #ffffff;
+}
+
+.reviewSuccessBanner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border: 1px solid #b9dcc4;
+  border-radius: 8px;
+  background: #f4fbf6;
+  color: #1d4f38;
+}
+
+.reviewSuccessBanner strong {
+  display: block;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.reviewSuccessBanner span {
+  display: block;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.reviewSuccessActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.productGuideCard {
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border: 1px solid #cfe0d8;
+  border-radius: 8px;
+  background: #f7fbf8;
+}
+
+.productGuideHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.productGuideHead strong {
+  color: #17221f;
+  font-size: 14px;
+}
+
+.productGuideList {
+  margin: 0;
+  padding-left: 18px;
+  color: #3f4f4a;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.panelPurpose {
+  margin: 0 0 10px;
+  color: #2d5a45;
+  font-size: 14px;
+  line-height: 1.55;
+  font-weight: 600;
+}
+
+.pendingPurpose {
+  margin-bottom: 14px;
+}
+
+.pendingPurpose h2 {
+  margin: 0 0 6px;
+}
+
+.pendingMeta {
+  margin: 0;
+}
+
+.inlineLink {
+  display: inline;
+  margin: 0 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #23724f;
+  font-size: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.importFlowLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.libraryRecentBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border: 1px solid #b9dcc4;
+  border-radius: 8px;
+  background: #f4fbf6;
+  color: #2d5a45;
+  font-size: 13px;
+}
+
+.atomRow.recentApproved {
+  border-color: #8fbea3;
+  background: #f4fbf6;
+}
+
+.recentApprovedTag {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #d8efe2;
+  color: #1d4f38;
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.fixtureModeBanner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border: 1px solid #e8d7a6;
+  border-radius: 8px;
+  background: #fffaf0;
+  color: #5a4a1f;
+}
+
+.fixtureModeBanner strong {
+  display: block;
+  color: #3d3214;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.fixtureModeBanner span {
+  display: block;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.fixtureModeBanner button {
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.importAiNotice {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #dce3e0;
+  background: #ffffff;
+}
+
+.importAiNotice.warning {
+  border-color: #e8d7a6;
+  background: #fffaf0;
+}
+
+.importAiNotice.ok {
+  border-color: #b9dcc4;
+  background: #f4fbf6;
+}
+
+.importAiNotice strong {
+  color: #17221f;
+  font-size: 13px;
+}
+
+.importAiNotice span {
+  color: #65766f;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.importAiNotice button {
+  justify-self: start;
+  margin-top: 4px;
+}
+
+.checkList .checkWarn {
+  color: #8a6d1f;
+}
+
 .onboardingHead {
   display: flex;
   align-items: center;
@@ -399,13 +660,184 @@ nav {
   line-height: 1.5;
 }
 
-.importCta {
+.importCtaRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   width: 100%;
   max-width: 360px;
 }
 
+.importCtaRow .importCta {
+  flex: 1;
+}
+
 .hint {
   margin-top: 12px;
+}
+
+.hintText {
+  margin: 4px 0 10px;
+  color: #64736e;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.sectionHeadingWrap {
+  margin-bottom: 14px;
+}
+
+.sectionHeadingWrap .sectionHeading {
+  margin: 0;
+}
+
+.sectionHeadingWrap .hintText {
+  margin: 6px 0 0;
+}
+
+.sectionHeading {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 14px;
+  color: #17221f;
+  font-size: 17px;
+  font-weight: 720;
+}
+
+.helpTip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+.helpTipIcon {
+  display: grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  border-radius: 999px;
+  background: #e8eeeb;
+  color: #4a5c56;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+}
+
+.helpTipBubble {
+  position: absolute;
+  z-index: 20;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 280px;
+  padding: 8px 10px;
+  border: 1px solid #cfd9d4;
+  border-radius: 8px;
+  background: #17221f;
+  color: #f3f7f4;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+  white-space: normal;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.12s ease, visibility 0.12s ease;
+}
+
+.helpTipBubble::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: #17221f;
+}
+
+.helpTip:hover .helpTipBubble,
+.helpTip:focus-visible .helpTipBubble {
+  opacity: 1;
+  visibility: visible;
+}
+
+.firstTimeBanner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid #b9dcc4;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #f4fbf6 0%, #ffffff 100%);
+  color: #1d4f38;
+}
+
+.firstTimeBannerBody {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.firstTimeBannerBody strong {
+  display: block;
+  margin-bottom: 4px;
+  color: #17221f;
+  font-size: 14px;
+}
+
+.firstTimeBannerClose {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+}
+
+.labelWithHelp {
+  display: grid;
+  gap: 4px;
+}
+
+.labelWithHelp > span:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.buttonHintWrap {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+}
+
+.runNextSteps {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #b9dcc4;
+  border-radius: 8px;
+  background: #f4fbf6;
+  color: #2d5a45;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.runOptionalNote {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border: 1px dashed #d5dedb;
+  border-radius: 8px;
+  background: #fafcfb;
+  color: #64736e;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .emptyState {
@@ -723,6 +1155,25 @@ nav {
   font-size: 13px;
 }
 
+.importBatchBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.atomRow.importBatch {
+  border-color: #5f9f7d;
+  box-shadow: inset 3px 0 0 #5f9f7d;
+}
+
+.importBatchTag {
+  margin-right: 8px;
+  color: #2f6f4f;
+  font-style: normal;
+  font-weight: 600;
+}
+
 .detail {
   display: grid;
   gap: 16px;
@@ -759,6 +1210,13 @@ nav {
   color: #34443f;
   font-size: 13px;
   font-weight: 650;
+}
+
+.formGrid label > span:first-child,
+.formGrid label > :first-child:not(select):not(input):not(textarea) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .formGrid input,
@@ -823,6 +1281,99 @@ nav {
 
 .runActions {
   margin-top: 14px;
+}
+
+.runSectionTitle {
+  margin: 16px 0 8px;
+  font-size: 14px;
+  color: #17221f;
+}
+
+.runWhenList {
+  margin: 0 0 14px;
+  padding-left: 18px;
+  color: #3f4f49;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.runWhenList li + li {
+  margin-top: 4px;
+}
+
+.runWhenSkip {
+  color: #6a7772;
+}
+
+.runResultCard {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid #b9dcc4;
+  border-radius: 8px;
+  background: #f4fbf6;
+}
+
+.runResultCard strong {
+  color: #1d4f38;
+  font-size: 14px;
+}
+
+.runResultMetrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.runResultLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.runResultLinks button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid #d7dfdc;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #17221f;
+  font-size: 13px;
+}
+
+.runAdvanced {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid #e6ece9;
+}
+
+.runAdvanced summary {
+  cursor: pointer;
+  color: #55645f;
+  font-size: 13px;
+}
+
+.automationIdleNotice {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border: 1px solid #e6ece9;
+  border-radius: 8px;
+  background: #f7f9f8;
+  color: #55645f;
+  font-size: 13px;
+}
+
+.automationEnabledNotice {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border: 1px solid #b9dcc4;
+  border-radius: 8px;
+  background: #f4fbf6;
+  color: #2d5a45;
+  font-size: 13px;
 }
 
 .actions button {
@@ -1010,6 +1561,11 @@ nav {
   display: grid;
   grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr);
   gap: 16px;
+}
+
+.privacyLayout > .firstTimeBanner,
+.commercialLayout > .firstTimeBanner {
+  grid-column: 1 / -1;
 }
 
 .privacyLayout .panel {
@@ -1331,7 +1887,8 @@ nav {
     flex-direction: column;
   }
 
-  .onboardingSteps {
+  .onboardingSteps,
+  .flowJourneySteps {
     grid-template-columns: 1fr;
   }
 

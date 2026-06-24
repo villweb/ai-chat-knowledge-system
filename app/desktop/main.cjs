@@ -119,7 +119,9 @@ function registerIpc() {
       state.sourceApp = input.sourceApp;
     }
     state.aiProvider = input.aiProvider === "openai-compatible" ? "openai-compatible" : "fixture";
-    state.apiKeyConfigured = Boolean(input.apiKey);
+    if (input.apiKey) {
+      state.apiKeyConfigured = true;
+    }
     if (input.apiKey) {
       process.env.AI_KB_OPENAI_API_KEY = input.apiKey;
       const credentialResult = await runScript("scripts/privacy-security.ts", ["save-credential", "--vault-root", state.vaultRoot], JSON.stringify({
@@ -180,10 +182,12 @@ function registerIpc() {
     const targetDir = path.join(state.vaultRoot, importPath);
     await mkdir(targetDir, { recursive: true });
     const copiedNames = [];
+    const copiedRawPaths = [];
     for (const file of result.filePaths) {
       const fileName = path.basename(file);
       await copyFile(file, path.join(targetDir, fileName));
       copiedNames.push(fileName);
+      copiedRawPaths.push(`${importPath}/${fileName}`);
     }
 
     pipelinePhase = "importing";
@@ -191,11 +195,18 @@ function registerIpc() {
 
     try {
       pipelinePhase = "processing";
-      const pipelineResult = await runDailyWorkflow(undefined, undefined, { uiManualImport: true });
+      const pipelineResult = await runDailyWorkflow(undefined, undefined, {
+        uiManualImport: true,
+        copiedRawPaths
+      });
       const atoms = await listAtoms();
       const pendingCount = atoms.filter((item) => item.atom.review_status === "pending").length;
       const importSummary = parseScriptStdout(pipelineResult.importResult);
       const extractSummary = parseScriptStdout(pipelineResult.extractResult);
+      const importBatchAtomIds = Array.from(new Set([
+        ...(importSummary?.generated_atom_ids ?? []),
+        ...(extractSummary?.generated_atom_ids ?? [])
+      ]));
       pipelinePhase = pendingCount > 0 ? "waiting_review" : "done";
       pushEvent(
         "import_pipeline_completed",
@@ -204,6 +215,7 @@ function registerIpc() {
       return {
         copied_file_count: result.filePaths.length,
         copied_file_names: copiedNames,
+        copied_raw_paths: copiedRawPaths,
         source_app: targetSource,
         import_path: importPath,
         auto_processed: true,
@@ -216,6 +228,8 @@ function registerIpc() {
         ),
         failed_file_count: importSummary?.failed_file_count ?? 0,
         blocked_record_count: extractSummary?.blocked_record_count ?? 0,
+        import_batch_atom_ids: importBatchAtomIds,
+        import_batch_record_ids: importSummary?.normalized_record_ids ?? [],
         used_personal_default: true,
         pipeline: getPipelineState(),
         ...pipelineResult
@@ -254,12 +268,11 @@ function registerIpc() {
   ipcMain.handle("workflow:run-daily", async () => {
     pipelinePhase = "processing";
     try {
-      const { importResult, extractResult } = await runDailyWorkflow();
-      const atoms = await listAtoms();
-      const pendingCount = atoms.filter((item) => item.atom.review_status === "pending").length;
-      pipelinePhase = pendingCount > 0 ? "waiting_review" : "done";
-      pushEvent("daily_run", `每日沉淀完成，${pendingCount} 条知识待确认。`);
-      return { importResult, extractResult, pending_atom_count: pendingCount, pipeline: getPipelineState() };
+      const workflowResult = await runDailyWorkflow();
+      const result = await buildDailyRunResult(workflowResult);
+      pipelinePhase = result.pending_atom_count > 0 ? "waiting_review" : "done";
+      pushEvent("daily_run", `每日沉淀完成，${result.pending_atom_count} 条知识待确认。`);
+      return result;
     } catch (error) {
       pipelinePhase = "idle";
       throw error;
@@ -275,7 +288,11 @@ function registerIpc() {
       throw new Error(result.stderr || "知识状态更新失败。");
     }
     pushEvent("atom_updated", "知识状态已更新。");
-    return JSON.parse(result.stdout);
+    const updated = JSON.parse(result.stdout);
+    // 审查后立即返回最新列表，避免 UI 使用陈旧 atoms / knowledge 视图
+    const atoms = await listAtoms();
+    const knowledge = await getKnowledgeView({});
+    return { ...updated, atoms, knowledge };
   });
 
   ipcMain.handle("knowledge:view", async (_event, input) => {
@@ -360,8 +377,16 @@ function registerIpc() {
 
     const runDate = pendingAutomationRun.run_date;
     pendingAutomationRun = null;
-    await runAutomationDate(runDate, "confirmed");
-    return getAutomationState();
+    pipelinePhase = "processing";
+    try {
+      const workflowResult = await runAutomationDate(runDate, "confirmed");
+      const result = await buildDailyRunResult(workflowResult);
+      pipelinePhase = result.pending_atom_count > 0 ? "waiting_review" : "done";
+      return result;
+    } catch (error) {
+      pipelinePhase = "idle";
+      throw error;
+    }
   });
 
   ipcMain.handle("automation:skip-run", async () => {
@@ -380,8 +405,16 @@ function registerIpc() {
       throw new Error("缺少重跑日期。");
     }
 
-    await runAutomationDate(input.run_date, "manual_rerun");
-    return getAutomationState();
+    pipelinePhase = "processing";
+    try {
+      const workflowResult = await runAutomationDate(input.run_date, "manual_rerun");
+      const result = await buildDailyRunResult(workflowResult);
+      pipelinePhase = result.pending_atom_count > 0 ? "waiting_review" : "done";
+      return result;
+    } catch (error) {
+      pipelinePhase = "idle";
+      throw error;
+    }
   });
 
   ipcMain.handle("automation:list-history", async () => listDailyRunHistory());
@@ -640,6 +673,11 @@ async function runDailyWorkflow(runDate, runIdPrefix, options = {}) {
   ];
   if (options.uiManualImport) {
     importArgs.push("--default-sensitivity-missing", "personal");
+    if (options.copiedRawPaths?.length) {
+      for (const rawPath of options.copiedRawPaths) {
+        importArgs.push("--only-raw-path", rawPath);
+      }
+    }
   }
   const extractArgs = [
     "--source-app",
@@ -659,6 +697,13 @@ async function runDailyWorkflow(runDate, runIdPrefix, options = {}) {
   if (!importResult.ok) {
     pushEvent("daily_run", importResult.stderr);
     throw new Error(importResult.stderr || "导入失败，已停止每日运行。");
+  }
+
+  const importSummary = parseScriptStdout(importResult);
+  if (options.uiManualImport && importSummary?.normalized_record_ids?.length) {
+    for (const recordId of importSummary.normalized_record_ids) {
+      extractArgs.push("--record-id", recordId);
+    }
   }
 
   if (state.aiProvider === "openai-compatible") {
@@ -782,6 +827,65 @@ async function listLogs() {
   }
 }
 
+async function ensureSessionConfigLoaded() {
+  if (sessionConfigLoaded) {
+    return;
+  }
+
+  sessionConfigLoaded = true;
+  const configPath = path.join(state.vaultRoot, SESSION_CONFIG_PATH);
+  let savedConfig = null;
+  try {
+    savedConfig = JSON.parse(await readFile(configPath, "utf8"));
+  } catch {
+    savedConfig = null;
+  }
+
+  const privacy = await getPrivacyState();
+  const credentialSaved = privacy.secure_credentials.openai_compatible_saved;
+
+  if (savedConfig?.source_app && isSourceEnabled(savedConfig.source_app)) {
+    state.sourceApp = savedConfig.source_app;
+  }
+
+  if (savedConfig?.ai_provider === "openai-compatible" || savedConfig?.ai_provider === "fixture") {
+    state.aiProvider = savedConfig.ai_provider;
+  } else if (credentialSaved) {
+    // 已保存 API Key 时默认启用真实 AI，避免重启后仍停留在测试模式
+    state.aiProvider = "openai-compatible";
+  }
+
+  if (savedConfig?.base_url) {
+    state.aiBaseUrl = savedConfig.base_url;
+    process.env.AI_KB_OPENAI_BASE_URL = savedConfig.base_url;
+  }
+  if (savedConfig?.model) {
+    state.aiModel = savedConfig.model;
+    process.env.AI_KB_OPENAI_MODEL = savedConfig.model;
+  }
+
+  if (state.aiProvider === "openai-compatible" && credentialSaved) {
+    try {
+      await loadSecureCredentialIntoEnv();
+    } catch {
+      // 凭据读取失败时保留当前 provider，由后续运行报错提示
+    }
+  }
+}
+
+async function saveSessionConfig() {
+  const configPath = path.join(state.vaultRoot, SESSION_CONFIG_PATH);
+  await mkdir(path.dirname(configPath), { recursive: true });
+  await writeFile(configPath, `${JSON.stringify({
+    schema_version: "desktop_session.v1",
+    source_app: state.sourceApp,
+    ai_provider: state.aiProvider,
+    base_url: state.aiBaseUrl,
+    model: state.aiModel,
+    updated_at: new Date().toISOString()
+  }, null, 2)}\n`, "utf8");
+}
+
 function getPipelineState() {
   return {
     phase: pipelinePhase,
@@ -829,4 +933,23 @@ function parseScriptStdout(result) {
   } catch {
     return null;
   }
+}
+
+async function buildDailyRunResult(workflowResult) {
+  const { importResult, extractResult } = workflowResult;
+  const atoms = await listAtoms();
+  const pendingCount = atoms.filter((item) => item.atom.review_status === "pending").length;
+  const importSummary = parseScriptStdout(importResult);
+  const extractSummary = parseScriptStdout(extractResult);
+  return {
+    importResult,
+    extractResult,
+    pending_atom_count: pendingCount,
+    normalized_record_count: importSummary?.normalized_record_count ?? 0,
+    generated_atom_count: Math.max(
+      importSummary?.generated_atom_count ?? 0,
+      extractSummary?.generated_atom_count ?? 0
+    ),
+    pipeline: getPipelineState()
+  };
 }

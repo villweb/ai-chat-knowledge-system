@@ -74,8 +74,11 @@ export class LocalStorageProvider implements StorageProvider {
     const items = await this.readKnowledgeAtomIndex();
     const nextItems = items.filter((item) => item.atom_id !== atom.atom_id);
     nextItems.push(atom);
-    nextItems.sort((left, right) => left.updated_at.localeCompare(right.updated_at));
+    await this.writeKnowledgeAtomIndex(nextItems);
+  }
 
+  async writeKnowledgeAtomIndex(atoms: KnowledgeAtom[]): Promise<void> {
+    const nextItems = [...atoms].sort((left, right) => left.updated_at.localeCompare(right.updated_at));
     const filePath = resolveVaultPath(this.options.vault_root, this.knowledgeAtomIndexPath);
     await mkdir(path.dirname(filePath), { recursive: true });
     await writeFile(filePath, `${JSON.stringify(nextItems, null, 2)}\n`, "utf8");

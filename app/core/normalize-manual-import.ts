@@ -143,14 +143,38 @@ function parseJsonDocument(document: RawSourceDocument, defaultSensitivityWhenMi
 }
 
 function parseMarkdownDocument(document: RawSourceDocument, defaultSensitivityWhenMissing: Sensitivity): ParsedDocument {
+  if (!document.content.startsWith("---\n")) {
+    return parseUnstructuredMarkdownDocument(document, defaultSensitivityWhenMissing);
+  }
+
   const { frontMatter, body } = parseFrontMatter(document.content);
-  const userMessage = extractSection(body, "用户消息");
-  const aiMessage = extractSection(body, "AI 回复");
+  const chatTurn = tryParseChatSections(body);
+  if (chatTurn) {
+    return {
+      conversation_id: requireFrontMatter(frontMatter, "conversation_id"),
+      project: optionalFrontMatter(frontMatter, "project") ?? "unknown",
+      topic: optionalFrontMatter(frontMatter, "topic") ?? "unknown",
+      raw_path: optionalFrontMatter(frontMatter, "raw_path") ?? document.raw_path,
+      raw_source: optionalFrontMatter(frontMatter, "raw_source") ?? document.raw_source,
+      sensitivity: parseSensitivity(optionalFrontMatter(frontMatter, "sensitivity"), defaultSensitivityWhenMissing),
+      turns: [
+        {
+          ...chatTurn,
+          message_time: optionalFrontMatter(frontMatter, "message_time") ?? "unknown"
+        }
+      ]
+    };
+  }
+
+  const topic = optionalFrontMatter(frontMatter, "topic")
+    ?? extractFirstHeading(body)
+    ?? inferTopicFromRawPath(document.raw_path);
 
   return {
-    conversation_id: requireFrontMatter(frontMatter, "conversation_id"),
+    conversation_id: optionalFrontMatter(frontMatter, "conversation_id")
+      ?? createHash("sha256").update(document.content, "utf8").digest("hex").slice(0, 16),
     project: optionalFrontMatter(frontMatter, "project") ?? "unknown",
-    topic: optionalFrontMatter(frontMatter, "topic") ?? "unknown",
+    topic,
     raw_path: optionalFrontMatter(frontMatter, "raw_path") ?? document.raw_path,
     raw_source: optionalFrontMatter(frontMatter, "raw_source") ?? document.raw_source,
     sensitivity: parseSensitivity(optionalFrontMatter(frontMatter, "sensitivity"), defaultSensitivityWhenMissing),
@@ -158,13 +182,65 @@ function parseMarkdownDocument(document: RawSourceDocument, defaultSensitivityWh
       {
         turn_index: 0,
         message_index_start: 0,
-        message_index_end: 1,
-        user_message: userMessage,
-        ai_message: aiMessage,
+        message_index_end: 0,
+        user_message: body.trim(),
+        ai_message: "",
         message_time: optionalFrontMatter(frontMatter, "message_time") ?? "unknown"
       }
     ]
   };
+}
+
+function parseUnstructuredMarkdownDocument(
+  document: RawSourceDocument,
+  defaultSensitivityWhenMissing: Sensitivity
+): ParsedDocument {
+  const content = document.content.trim();
+  const topic = extractFirstHeading(content) ?? inferTopicFromRawPath(document.raw_path);
+
+  return {
+    conversation_id: createHash("sha256").update(content, "utf8").digest("hex").slice(0, 16),
+    project: "unknown",
+    topic,
+    raw_path: document.raw_path,
+    raw_source: document.raw_source,
+    sensitivity: defaultSensitivityWhenMissing,
+    turns: [
+      {
+        turn_index: 0,
+        message_index_start: 0,
+        message_index_end: 0,
+        user_message: content,
+        ai_message: "",
+        message_time: "unknown"
+      }
+    ]
+  };
+}
+
+function tryParseChatSections(body: string): Omit<ParsedTurn, "message_time"> | null {
+  try {
+    return {
+      turn_index: 0,
+      message_index_start: 0,
+      message_index_end: 1,
+      user_message: extractSection(body, "用户消息"),
+      ai_message: extractSection(body, "AI 回复")
+    };
+  } catch {
+    return null;
+  }
+}
+
+function extractFirstHeading(content: string): string | undefined {
+  const match = content.match(/^#\s+(.+)$/m);
+  return match?.[1]?.trim();
+}
+
+function inferTopicFromRawPath(rawPath: string): string {
+  const fileName = rawPath.split("/").pop() ?? rawPath;
+  const baseName = fileName.replace(/\.(md|markdown|txt)$/i, "");
+  return baseName || "unknown";
 }
 
 function parseTxtDocument(document: RawSourceDocument, defaultSensitivityWhenMissing: Sensitivity): ParsedDocument {

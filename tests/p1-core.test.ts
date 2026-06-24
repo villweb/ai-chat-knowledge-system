@@ -57,6 +57,34 @@ test("normalizeManualImport can default missing sensitivity to personal for UI m
   assert.equal(record.can_enter_personal_kb, true);
 });
 
+test("normalizeManualImport parses unstructured personal markdown essays", () => {
+  const document: RawSourceDocument = {
+    source_app: "codex",
+    source_type: "manual_export",
+    raw_path: "raw/imports/codex/个人碎碎念_第1篇_语音输入.md",
+    raw_source: "unit_test",
+    detected_at: "2026-06-23T00:00:00.000Z",
+    content_type: "markdown",
+    content: `# 当我终于不再被打字速度困住
+
+我以前一直觉得，语音输入这东西没什么大用。
+
+## 一试，发现我错了
+
+有了语音输入，我的创作再也不用被打字速度束缚了。`
+  };
+
+  const [record] = normalizeManualImport(document, "2026-06-23T00:00:00.000Z", {
+    defaultSensitivityWhenMissing: "personal"
+  });
+  assert.ok(record);
+  assert.equal(record.topic, "当我终于不再被打字速度困住");
+  assert.equal(record.ai_message, "");
+  assert.ok(record.user_message.includes("语音输入这东西没什么大用"));
+  assert.equal(record.sensitivity, "personal");
+  assert.equal(record.can_enter_personal_kb, true);
+});
+
 test("runManualImportNormalization archives raw files, writes SQLite records, pending cards and daily run", async () => {
   const vaultRoot = await createTempVault();
   await writeCodexSamples(vaultRoot);
@@ -99,10 +127,12 @@ test("runManualImportNormalization archives raw files, writes SQLite records, pe
     vault_root: vaultRoot,
     sqlite_path: "data/runtime/normalized-records.sqlite"
   });
-  const indexedAtom = await storage.findKnowledgeAtom(firstAtomId(records));
+  const markdownRecord = records.find((record) => record.topic === "Markdown 示例");
+  assert.ok(markdownRecord);
+  const indexedAtom = await storage.findKnowledgeAtom(firstAtomId([markdownRecord]));
   storage.close();
   assert.equal(indexedAtom?.review_status, "pending");
-  assert.ok(indexedAtom?.content.includes("后续 P2"));
+  assert.ok(indexedAtom?.content.includes("请记录这条 Markdown 对话"));
 
   const dailyRun = JSON.parse(await readFile(path.join(vaultRoot, "data/daily_runs/run_p1_test.json"), "utf8")) as {
     status: string;

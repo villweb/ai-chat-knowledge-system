@@ -8,6 +8,7 @@ type CliOptions = {
   run_id?: string;
   run_date?: string;
   default_sensitivity_when_missing?: "personal" | "private" | "confidential";
+  only_raw_paths?: string[];
 };
 
 const SOURCE_APPS = new Set<SourceApp>(["codex", "cursor", "deepseek", "doubao", "workbuddy"]);
@@ -18,16 +19,32 @@ console.log(JSON.stringify(summary, null, 2));
 
 function parseArgs(args: string[]): CliOptions {
   const values = new Map<string, string>();
+  const onlyRawPaths: string[] = [];
 
-  for (let index = 0; index < args.length; index += 2) {
+  for (let index = 0; index < args.length; index += 1) {
     const key = args[index];
-    const value = args[index + 1];
-
-    if (!key?.startsWith("--") || !value) {
-      throw new Error(`Invalid argument pair near: ${key ?? ""}`);
+    if (!key?.startsWith("--")) {
+      throw new Error(`Invalid argument: ${key ?? ""}`);
     }
 
-    values.set(key.slice(2), value);
+    const flag = key.slice(2);
+    if (flag === "only-raw-path") {
+      const value = args[index + 1];
+      if (!value || value.startsWith("--")) {
+        throw new Error("Missing value for --only-raw-path");
+      }
+      onlyRawPaths.push(value);
+      index += 1;
+      continue;
+    }
+
+    const value = args[index + 1];
+    if (!value) {
+      throw new Error(`Invalid argument pair near: ${key}`);
+    }
+
+    values.set(flag, value);
+    index += 1;
   }
 
   const sourceApp = values.get("source-app") ?? "codex";
@@ -54,6 +71,9 @@ function parseArgs(args: string[]): CliOptions {
     defaultSensitivityMissing === "confidential"
   ) {
     result.default_sensitivity_when_missing = defaultSensitivityMissing;
+  }
+  if (onlyRawPaths.length > 0) {
+    result.only_raw_paths = onlyRawPaths;
   }
 
   return result;
