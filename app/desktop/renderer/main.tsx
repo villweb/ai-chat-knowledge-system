@@ -378,15 +378,6 @@ const desktopApi = getDesktopApi();
 
 const PRODUCT_GUIDE_DISMISS_KEY = "ai-kb-product-guide-dismissed";
 
-const flowJourneySteps = [
-  { step: 1, label: "导入对话", hint: "选择 AI 聊天导出文件", why: "从已有对话开始沉淀个人知识" },
-  { step: 2, label: "AI 提炼候选", hint: "自动标准化并生成候选知识", why: "AI 只生成草稿，不会直接写入正式库" },
-  { step: 3, label: "你确认质量", hint: "批准或拒绝每条候选", why: "避免错误内容自动入库，保护隐私与质量" },
-  { step: 4, label: "知识库使用", hint: "搜索、导出、同步 Obsidian", why: "已批准的知识在这里长期使用" }
-];
-
-const flowJourneyPageKeys: NavKey[] = ["import", "run", "pending", "library", "detail"];
-
 const pipelineSubsteps = [
   { key: "copying", label: "复制中" },
   { key: "normalizing", label: "标准化" },
@@ -1024,25 +1015,6 @@ function App() {
     setReviewSuccess(null);
   }
 
-  function computeFlowStep(): number {
-    if (active === "library") {
-      return 4;
-    }
-    if (active === "pending" || active === "detail") {
-      return 3;
-    }
-    if (active === "run" || (active === "import" && busy)) {
-      return 2;
-    }
-    if (counts.pending > 0) {
-      return 3;
-    }
-    if (counts.approved > 0) {
-      return 4;
-    }
-    return 1;
-  }
-
   function formatImportSuccess(result: ImportResult): string {
     if (!result.copied_file_count) {
       return "未选择文件。";
@@ -1396,16 +1368,6 @@ function App() {
           </div>
         </header>
 
-        {flowJourneyPageKeys.includes(active) && (
-          <FlowJourneyStrip
-            steps={flowJourneySteps}
-            activeStep={computeFlowStep()}
-            onGoImport={() => setActive("import")}
-            onGoPending={() => setActive("pending")}
-            onGoLibrary={() => goToLibrary()}
-          />
-        )}
-
         {reviewSuccess && (
           <ReviewSuccessBanner
             remainingPending={reviewSuccess.remainingPending}
@@ -1545,57 +1507,6 @@ function FixtureModeBanner({ onGoSettings }: { onGoSettings: () => void }) {
         <span>提炼结果由本地模板生成。如需真实 AI 提炼，请前往「设置」切换为「真实 AI API」并配置 DeepSeek。</span>
       </div>
       <button className="secondary" onClick={onGoSettings}><Settings size={16} />去设置</button>
-    </div>
-  );
-}
-
-function FlowJourneyStrip({
-  steps,
-  activeStep,
-  onGoImport,
-  onGoPending,
-  onGoLibrary
-}: {
-  steps: Array<{ step: number; label: string; hint: string; why: string }>;
-  activeStep: number;
-  onGoImport: () => void;
-  onGoPending: () => void;
-  onGoLibrary: () => void;
-}) {
-  return (
-    <div className="flowJourneyStrip">
-      <div className="flowJourneySteps">
-        {steps.map((item) => {
-          const isActive = activeStep === item.step;
-          const isDone = activeStep > item.step;
-          return (
-            <button
-              key={item.step}
-              type="button"
-              className={[
-                "flowJourneyStep",
-                isActive ? "active" : "",
-                isDone ? "done" : ""
-              ].filter(Boolean).join(" ")}
-              onClick={() => {
-                if (item.step <= 1) {
-                  onGoImport();
-                } else if (item.step <= 3) {
-                  onGoPending();
-                } else {
-                  onGoLibrary();
-                }
-              }}
-            >
-              <span className="stepNumber">{item.step}</span>
-              <div>
-                <strong>{item.label}</strong>
-                <small>{isActive ? item.why : item.hint}</small>
-              </div>
-            </button>
-          );
-        })}
-      </div>
     </div>
   );
 }

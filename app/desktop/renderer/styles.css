@@ -622,65 +622,6 @@ nav {
   background: linear-gradient(180deg, #f7fbf8 0%, #ffffff 100%);
 }
 
-.flowJourneyStrip {
-  margin-bottom: 12px;
-  padding: 10px 12px;
-  border: 1px solid #cfe0d8;
-  border-radius: 8px;
-  background: linear-gradient(180deg, #f7fbf8 0%, #ffffff 100%);
-}
-
-.flowJourneySteps {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.flowJourneyStep {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 8px 10px;
-  border: 1px solid #dce3e0;
-  border-radius: 8px;
-  background: #ffffff;
-  opacity: 0.72;
-  text-align: left;
-  cursor: pointer;
-}
-
-.flowJourneyStep.active {
-  border-color: #8fbea3;
-  background: #f4fbf6;
-  opacity: 1;
-}
-
-.flowJourneyStep.done {
-  opacity: 0.9;
-}
-
-.flowJourneyStep strong,
-.flowJourneyStep small {
-  display: block;
-}
-
-.flowJourneyStep strong {
-  color: #17221f;
-  font-size: 12px;
-}
-
-.flowJourneyStep small {
-  margin-top: 3px;
-  color: #64736e;
-  font-size: 11px;
-  line-height: 1.4;
-}
-
-.flowJourneyStep.active .stepNumber {
-  background: #23724f;
-  color: #ffffff;
-}
-
 .reviewSuccessBanner {
   display: flex;
   align-items: flex-start;
@@ -2200,8 +2141,7 @@ nav {
     flex-direction: column;
   }
 
-  .onboardingSteps,
-  .flowJourneySteps {
+  .onboardingSteps {
     grid-template-columns: 1fr;
   }
 
