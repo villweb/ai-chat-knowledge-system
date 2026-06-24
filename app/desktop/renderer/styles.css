@@ -5,6 +5,32 @@
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+
+  /* 按钮设计系统：高度、间距、圆角、语义色 */
+  --btn-height: 36px;
+  --btn-height-sm: 32px;
+  --btn-icon: 16px;
+  --btn-pad-x: 14px;
+  --btn-pad-x-sm: 12px;
+  --btn-radius: 8px;
+  --btn-gap: 8px;
+  --btn-font: 13px;
+  --btn-weight: 650;
+  --btn-primary-bg: #23724f;
+  --btn-primary-hover: #185d3e;
+  --btn-primary-text: #ffffff;
+  --btn-primary-soft-bg: #2d8a63;
+  --btn-primary-soft-hover: #3a9d75;
+  --btn-primary-soft-text: #ffffff;
+  --btn-secondary-bg: #ffffff;
+  --btn-secondary-border: #d7dfdc;
+  --btn-secondary-text: #17221f;
+  --btn-secondary-hover: #f2f7f4;
+  --btn-danger-bg: #ffffff;
+  --btn-danger-border: #e5b4b4;
+  --btn-danger-text: #8a2f25;
+  --btn-danger-hover: #fff5f5;
+  --btn-ghost-hover: #eef2f0;
 }
 
 * {
@@ -115,17 +141,77 @@ nav {
 }
 
 .nav,
-.iconText,
-.iconOnly,
-.primary,
-.actions button {
+.iconText {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: var(--btn-gap);
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--btn-radius);
   min-height: 40px;
+}
+
+/* 工作区按钮共用基础（侧栏导航除外） */
+.primary,
+.primarySoft,
+.secondary,
+.danger,
+.ghost,
+.iconOnly,
+.actions button,
+.importFlowLinks button,
+.libraryToolbar button,
+.importCtaRow .importCta,
+.privacyActions button,
+.duplicateRow button,
+.runResultLinks button,
+.reviewSuccessActions > button:not(.iconOnly),
+.atomInlineActions button,
+.importAiNotice button,
+.fixtureModeBanner > button,
+.commercialActions button,
+.libraryRecentBar button,
+.importPipelineProgress button,
+.bootBox .primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--btn-gap);
+  min-height: var(--btn-height);
+  padding: 0 var(--btn-pad-x);
+  border: 1px solid transparent;
+  border-radius: var(--btn-radius);
+  background: transparent;
+  color: var(--btn-secondary-text);
+  font-size: var(--btn-font);
+  font-weight: var(--btn-weight);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.primary svg,
+.primarySoft svg,
+.secondary svg,
+.danger svg,
+.ghost svg,
+.iconOnly svg,
+.actions button svg,
+.importFlowLinks button svg,
+.libraryToolbar button svg,
+.importCtaRow .importCta svg,
+.privacyActions button svg,
+.duplicateRow button svg,
+.runResultLinks button svg,
+.reviewSuccessActions > button:not(.iconOnly) svg,
+.atomInlineActions button svg,
+.importAiNotice button svg,
+.fixtureModeBanner > button svg,
+.commercialActions button svg,
+.libraryRecentBar button svg,
+.importPipelineProgress button svg {
+  flex-shrink: 0;
+  width: var(--btn-icon);
+  height: var(--btn-icon);
 }
 
 .nav {
@@ -206,11 +292,22 @@ nav {
 }
 
 .iconOnly {
-  width: 40px;
-  height: 40px;
-  background: #ffffff;
-  color: #1e2e29;
-  border: 1px solid #d9e1de;
+  width: var(--btn-height);
+  min-width: var(--btn-height);
+  padding: 0;
+  background: var(--btn-secondary-bg);
+  color: var(--btn-secondary-text);
+  border-color: var(--btn-secondary-border);
+}
+
+.iconOnly:hover:not(:disabled) {
+  background: var(--btn-secondary-hover);
+}
+
+.firstTimeBannerClose {
+  width: var(--btn-height-sm);
+  min-width: var(--btn-height-sm);
+  min-height: var(--btn-height-sm);
 }
 
 .notice {
@@ -235,6 +332,12 @@ nav {
   gap: 10px;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.pipelineStatusWrap {
+  display: grid;
+  gap: 6px;
+  justify-items: end;
 }
 
 .pipelineStatus {
@@ -270,6 +373,153 @@ nav {
   color: #1d6333;
 }
 
+.pipelineStatus.phase-failed {
+  border-color: #efb8b8;
+  background: #fff3f3;
+  color: #7a1f1f;
+}
+
+.pipelineRetry {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 4px;
+  padding: 0 var(--btn-pad-x-sm);
+  border: 1px solid var(--btn-danger-border);
+  border-radius: 999px;
+  min-height: var(--btn-height-sm);
+  background: var(--btn-danger-bg);
+  color: var(--btn-danger-text);
+  font-size: 12px;
+  font-weight: var(--btn-weight);
+}
+
+.pipelineRetry svg {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+}
+
+.pipelineSubsteps {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.pipelineSubstep {
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid #d9e1de;
+  background: #ffffff;
+  color: #64736e;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.pipelineSubstep.active {
+  border-color: #b8d9f0;
+  background: #edf6ff;
+  color: #16364f;
+}
+
+.pipelineSubstep.done {
+  border-color: #b8dfc4;
+  background: #eef9f1;
+  color: #1d6333;
+}
+
+.navMoreToggle {
+  color: #a9b8b3;
+}
+
+.navMoreToggle.open {
+  color: #ffffff;
+}
+
+.navSecondary {
+  display: grid;
+  gap: 4px;
+  padding-left: 8px;
+  border-left: 1px solid #2f413c;
+}
+
+.navSecondary .nav {
+  min-height: 36px;
+  font-size: 13px;
+}
+
+.importSourceGrid {
+  margin-top: 8px;
+}
+
+.importPipelineProgress {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+  padding: 12px 14px;
+  border: 1px solid #d9e1de;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.importPipelineProgress.phase-failed {
+  border-color: #efb8b8;
+  background: #fff8f8;
+}
+
+.importPipelineProgress strong {
+  color: #16364f;
+}
+
+.importPipelineProgress.phase-failed strong {
+  color: #7a1f1f;
+}
+
+.atomRowInline {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid #d9e1de;
+  border-radius: 8px;
+  background: #ffffff;
+  text-align: left;
+}
+
+.atomRowMain {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.atomPreview {
+  margin: 0;
+  color: #3b4a46;
+  font-size: 13px;
+  line-height: 1.55;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.atomInlineActions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 88px;
+}
+
+.atomInlineActions button {
+  min-height: var(--btn-height-sm);
+  padding: 0 var(--btn-pad-x-sm);
+  font-size: 12px;
+}
+
 .pipelineMeta {
   padding-left: 8px;
   border-left: 1px solid #d9e1de;
@@ -278,7 +528,88 @@ nav {
 }
 
 .nextAction {
-  min-height: 40px;
+  min-height: var(--btn-height);
+}
+
+/* 主操作：保存、批准、导入、运行等 */
+.primary {
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-text);
+  border-color: var(--btn-primary-bg);
+}
+
+.primary:hover:not(:disabled) {
+  background: var(--btn-primary-hover);
+  border-color: var(--btn-primary-hover);
+}
+
+/* 浅主操作：测试模式横幅「去设置」等，比标准 primary 略浅 */
+.primarySoft {
+  background: var(--btn-primary-soft-bg);
+  color: var(--btn-primary-soft-text);
+  border-color: var(--btn-primary-soft-bg);
+}
+
+.primarySoft:hover:not(:disabled) {
+  background: var(--btn-primary-soft-hover);
+  border-color: var(--btn-primary-soft-hover);
+}
+
+/* 次要操作：导航、导出、取消等 */
+.secondary,
+.actions button:not(.primary):not(.primarySoft):not(.danger),
+.importFlowLinks button,
+.libraryToolbar button,
+.privacyActions button:not(.primary):not(.primarySoft):not(.danger),
+.duplicateRow button,
+.runResultLinks button,
+.reviewSuccessActions > button:not(.iconOnly):not(.primary):not(.primarySoft):not(.danger),
+.commercialActions button:not(.primary):not(.primarySoft):not(.danger),
+.libraryRecentBar button,
+.importPipelineProgress button:not(.primary):not(.primarySoft),
+.atomInlineActions button:not(.primary):not(.primarySoft):not(.danger) {
+  background: var(--btn-secondary-bg);
+  color: var(--btn-secondary-text);
+  border-color: var(--btn-secondary-border);
+}
+
+.secondary:hover:not(:disabled),
+.actions button:not(.primary):not(.primarySoft):not(.danger):hover:not(:disabled),
+.importFlowLinks button:hover:not(:disabled),
+.libraryToolbar button:hover:not(:disabled),
+.privacyActions button:not(.primary):not(.primarySoft):not(.danger):hover:not(:disabled),
+.duplicateRow button:hover:not(:disabled),
+.runResultLinks button:hover:not(:disabled),
+.reviewSuccessActions > button:not(.iconOnly):not(.primary):not(.primarySoft):not(.danger):hover:not(:disabled),
+.commercialActions button:not(.primary):not(.primarySoft):not(.danger):hover:not(:disabled),
+.libraryRecentBar button:hover:not(:disabled),
+.importPipelineProgress button:not(.primary):not(.primarySoft):hover:not(:disabled),
+.atomInlineActions button:not(.primary):not(.primarySoft):not(.danger):hover:not(:disabled) {
+  background: var(--btn-secondary-hover);
+}
+
+/* 危险操作：拒绝、删除等 */
+.danger {
+  background: var(--btn-danger-bg);
+  color: var(--btn-danger-text);
+  border-color: var(--btn-danger-border);
+}
+
+.danger:hover:not(:disabled) {
+  background: var(--btn-danger-hover);
+}
+
+/* 轻量操作：卡片内文字链式按钮 */
+.ghost {
+  min-height: var(--btn-height-sm);
+  padding: 0 var(--btn-pad-x-sm);
+  background: transparent;
+  border-color: transparent;
+  color: #23724f;
+}
+
+.ghost:hover:not(:disabled) {
+  background: var(--btn-ghost-hover);
 }
 
 .navBadge {
@@ -308,65 +639,6 @@ nav {
   border: 1px solid #cfe0d8;
   border-radius: 8px;
   background: linear-gradient(180deg, #f7fbf8 0%, #ffffff 100%);
-}
-
-.flowJourneyStrip {
-  margin-bottom: 12px;
-  padding: 10px 12px;
-  border: 1px solid #cfe0d8;
-  border-radius: 8px;
-  background: linear-gradient(180deg, #f7fbf8 0%, #ffffff 100%);
-}
-
-.flowJourneySteps {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.flowJourneyStep {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 8px 10px;
-  border: 1px solid #dce3e0;
-  border-radius: 8px;
-  background: #ffffff;
-  opacity: 0.72;
-  text-align: left;
-  cursor: pointer;
-}
-
-.flowJourneyStep.active {
-  border-color: #8fbea3;
-  background: #f4fbf6;
-  opacity: 1;
-}
-
-.flowJourneyStep.done {
-  opacity: 0.9;
-}
-
-.flowJourneyStep strong,
-.flowJourneyStep small {
-  display: block;
-}
-
-.flowJourneyStep strong {
-  color: #17221f;
-  font-size: 12px;
-}
-
-.flowJourneyStep small {
-  margin-top: 3px;
-  color: #64736e;
-  font-size: 11px;
-  line-height: 1.4;
-}
-
-.flowJourneyStep.active .stepNumber {
-  background: #23724f;
-  color: #ffffff;
 }
 
 .reviewSuccessBanner {
@@ -672,6 +944,36 @@ nav {
   flex: 1;
 }
 
+/* 工作区主 CTA（设置、引导、隐私、导入等）：覆盖共用基础里的透明底，使用 primary 深绿 */
+.settingsPanel .actions button.primary,
+.actions button.primary,
+.privacyActions button.primary,
+.importCtaRow .importCta.primary {
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-text);
+  border-color: var(--btn-primary-bg);
+}
+
+.settingsPanel .actions button.primary:hover:not(:disabled),
+.actions button.primary:hover:not(:disabled),
+.privacyActions button.primary:hover:not(:disabled),
+.importCtaRow .importCta.primary:hover:not(:disabled) {
+  background: #2d8a63;
+  border-color: #2d8a63;
+}
+
+/* 浅主 CTA：覆盖共用基础里的透明底 */
+.fixtureModeBanner > button.primarySoft {
+  background: var(--btn-primary-soft-bg);
+  color: var(--btn-primary-soft-text);
+  border-color: var(--btn-primary-soft-bg);
+}
+
+.fixtureModeBanner > button.primarySoft:hover:not(:disabled) {
+  background: var(--btn-primary-soft-hover);
+  border-color: var(--btn-primary-soft-hover);
+}
+
 .hint {
   margin-top: 12px;
 }
@@ -795,8 +1097,6 @@ nav {
 
 .firstTimeBannerClose {
   flex-shrink: 0;
-  width: 32px;
-  height: 32px;
 }
 
 .labelWithHelp {
@@ -1006,23 +1306,11 @@ nav {
   gap: 2px;
 }
 
-.primary {
-  padding: 0 14px;
-  background: #23724f;
-  color: #ffffff;
-  font-weight: 650;
-}
-
-.primary:hover {
-  background: #185d3e;
-}
-
 .listHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  margin-bottom: 12px;
+  display: grid;
+  gap: 10px;
+  margin-bottom: 0;
+  min-width: 0;
 }
 
 .statusPills {
@@ -1095,16 +1383,81 @@ nav {
   color: #33418d;
 }
 
+/* 筛选项统一布局：多行网格、标签在上、控件等高 */
+.filterBar {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 10px 12px;
+  width: 100%;
+  min-width: 0;
+  margin: 12px 0;
+}
+
+.filterField {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+}
+
+.filterField--wide {
+  grid-column: 1 / -1;
+}
+
+.filterLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 18px;
+  color: #34443f;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.filterLabel svg {
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+}
+
+.filterField select,
+.filterField input[type="text"],
+.filterField input[type="search"],
+.filterField input[type="date"],
+.filterField input[type="time"],
+.filterField input[type="number"],
+.filterField input:not([type]) {
+  width: 100%;
+  min-width: 0;
+  height: var(--btn-height-sm);
+  padding: 0 10px;
+  border: 1px solid #d8e0dd;
+  border-radius: var(--btn-radius);
+  background: #ffffff;
+  color: #17221f;
+  outline: 0;
+}
+
 .search {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-width: min(360px, 100%);
-  min-height: 40px;
-  padding: 0 12px;
+  width: 100%;
+  min-width: 0;
+  min-height: var(--btn-height-sm);
+  height: var(--btn-height-sm);
+  padding: 0 10px;
   border: 1px solid #d9e1de;
-  border-radius: 8px;
+  border-radius: var(--btn-radius);
   background: #ffffff;
+}
+
+.search svg {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  color: #64736e;
 }
 
 .search input {
@@ -1112,6 +1465,19 @@ nav {
   min-width: 0;
   border: 0;
   outline: 0;
+  background: transparent;
+  color: #17221f;
+}
+
+.filterBar .search {
+  min-height: var(--btn-height-sm);
+  height: var(--btn-height-sm);
+}
+
+@media (min-width: 720px) {
+  .filterField--search {
+    grid-column: span 2;
+  }
 }
 
 .atomList,
@@ -1212,11 +1578,12 @@ nav {
   font-weight: 650;
 }
 
-.formGrid label > span:first-child,
-.formGrid label > :first-child:not(select):not(input):not(textarea) {
+/* 标签文字与帮助图标同一行；避免 formGrid label 的 grid 把二者拆成两行 */
+.labelWithHint {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
+  min-height: 18px;
 }
 
 .formGrid input,
@@ -1284,6 +1651,9 @@ nav {
 }
 
 .runSectionTitle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   margin: 16px 0 8px;
   font-size: 14px;
   color: #17221f;
@@ -1332,18 +1702,6 @@ nav {
   gap: 8px;
 }
 
-.runResultLinks button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  border: 1px solid #d7dfdc;
-  border-radius: 8px;
-  background: #ffffff;
-  color: #17221f;
-  font-size: 13px;
-}
-
 .runAdvanced {
   margin-top: 18px;
   padding-top: 12px;
@@ -1378,14 +1736,6 @@ nav {
 
 .actions button {
   min-width: 96px;
-  padding: 0 12px;
-  border: 1px solid #d7dfdc;
-  background: #ffffff;
-  color: #17221f;
-}
-
-.actions button:hover {
-  background: #f2f7f4;
 }
 
 .pendingAutomation,
@@ -1455,57 +1805,11 @@ nav {
   grid-row: span 3;
 }
 
-.filterGrid {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(130px, 1fr));
-  gap: 10px;
-  margin-top: 12px;
-}
-
-.filterGrid label {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  color: #34443f;
-  font-size: 13px;
-  font-weight: 650;
-}
-
-.filterGrid select {
-  grid-column: 1 / -1;
-  width: 100%;
-  min-width: 0;
-  height: 38px;
-  padding: 0 9px;
-  border: 1px solid #d8e0dd;
-  border-radius: 8px;
-  background: #ffffff;
-  color: #17221f;
-  outline: 0;
-}
-
 .libraryToolbar {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 14px;
-}
-
-.libraryToolbar button,
-.duplicateRow button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  min-height: 38px;
-  min-width: 0;
-  padding: 0 11px;
-  border: 1px solid #d7dfdc;
-  border-radius: 8px;
-  background: #ffffff;
-  color: #17221f;
 }
 
 .duplicateList,
@@ -1539,7 +1843,8 @@ nav {
   align-items: center;
 }
 
-.duplicateRow button:first-child {
+.duplicateRow button:first-child,
+.duplicateRow button.ghost {
   justify-content: flex-start;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1577,20 +1882,6 @@ nav {
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 14px;
-}
-
-.privacyActions button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  min-height: 38px;
-  min-width: 0;
-  padding: 0 11px;
-  border: 1px solid #d7dfdc;
-  border-radius: 8px;
-  background: #ffffff;
-  color: #17221f;
 }
 
 .secureState,
@@ -1807,18 +2098,30 @@ nav {
 
 .commercialLinkList a,
 .commercialActions a {
-  min-height: 38px;
+  min-height: var(--btn-height);
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 13px;
-  border-radius: 8px;
-  border: 1px solid #d5dedb;
+  gap: var(--btn-gap);
+  padding: 0 var(--btn-pad-x);
+  border-radius: var(--btn-radius);
+  border: 1px solid var(--btn-secondary-border);
   color: #173c35;
   text-decoration: none;
-  font-size: 13px;
-  font-weight: 700;
-  background: #ffffff;
+  font-size: var(--btn-font);
+  font-weight: var(--btn-weight);
+  background: var(--btn-secondary-bg);
+}
+
+.commercialLinkList a:hover,
+.commercialActions a:hover {
+  background: var(--btn-secondary-hover);
+}
+
+.commercialLinkList a svg,
+.commercialActions a svg {
+  flex-shrink: 0;
+  width: var(--btn-icon);
+  height: var(--btn-icon);
 }
 
 .websiteList {
@@ -1867,8 +2170,12 @@ nav {
     grid-template-columns: 1fr;
   }
 
-  .filterGrid {
+  .filterBar {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .filterField--search {
+    grid-column: 1 / -1;
   }
 
   .metricGrid {
@@ -1887,8 +2194,7 @@ nav {
     flex-direction: column;
   }
 
-  .onboardingSteps,
-  .flowJourneySteps {
+  .onboardingSteps {
     grid-template-columns: 1fr;
   }
 
@@ -1920,7 +2226,7 @@ nav {
     flex: 1 1 120px;
   }
 
-  .filterGrid {
+  .filterBar {
     grid-template-columns: 1fr;
   }
 

@@ -9,6 +9,7 @@ type CliOptions = {
   run_date?: string;
   default_sensitivity_when_missing?: "personal" | "private" | "confidential";
   only_raw_paths?: string[];
+  write_pending_atoms?: boolean;
 };
 
 const SOURCE_APPS = new Set<SourceApp>(["codex", "cursor", "deepseek", "doubao", "workbuddy"]);
@@ -35,6 +36,10 @@ function parseArgs(args: string[]): CliOptions {
       }
       onlyRawPaths.push(value);
       index += 1;
+      continue;
+    }
+    if (flag === "skip-pending-atoms") {
+      values.set("write-pending-atoms", "false");
       continue;
     }
 
@@ -74,6 +79,9 @@ function parseArgs(args: string[]): CliOptions {
   }
   if (onlyRawPaths.length > 0) {
     result.only_raw_paths = onlyRawPaths;
+  }
+  if (values.get("write-pending-atoms") === "false") {
+    result.write_pending_atoms = false;
   }
 
   return result;

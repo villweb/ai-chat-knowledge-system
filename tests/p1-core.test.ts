@@ -170,6 +170,26 @@ test("runManualImportNormalization archives raw files, writes SQLite records, pe
   assert.equal(inboxFilesAfterSecondRun.length, 2);
 });
 
+test("runManualImportNormalization can skip P1 pending cards for automatic P2 pipelines", async () => {
+  const vaultRoot = await createTempVault();
+  await writeCodexSamples(vaultRoot);
+
+  const summary = await runManualImportNormalization({
+    vault_root: vaultRoot,
+    source_app: "codex",
+    run_id: "run_p1_skip_cards",
+    write_pending_atoms: false
+  });
+
+  assert.equal(summary.imported_file_count, 2);
+  assert.equal(summary.normalized_record_count, 2);
+  assert.equal(summary.generated_atom_count, 0);
+  assert.equal(summary.normalized_record_ids.length, 2);
+
+  const inboxFiles = await listFiles(path.join(vaultRoot, "knowledge/inbox"));
+  assert.equal(inboxFiles.length, 0);
+});
+
 test("rebuildLocalIndexes skips Obsidian _index.md without YAML front matter", async () => {
   const vaultRoot = await createTempVault();
   await writeCodexSamples(vaultRoot);

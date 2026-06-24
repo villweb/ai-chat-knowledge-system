@@ -53,6 +53,21 @@ test("P7 encrypted API key storage does not write plaintext", async () => {
   assert.equal(state.openai_compatible_saved, true);
 });
 
+test("P7 user data export excludes secure credential material", async () => {
+  const vaultRoot = await createTempVault();
+  await saveSecureCredential(vaultRoot, {
+    service: "openai-compatible",
+    api_key: "sk-test-secret-value-1234567890"
+  }, "2026-06-23T12:11:00.000Z");
+
+  const exported = await exportUserData(vaultRoot, new Date("2026-06-23T12:12:00.000Z"));
+  assert.equal(exported.excluded_paths.includes("data/runtime/secure"), true);
+
+  const exportRoot = path.join(vaultRoot, exported.export_dir);
+  await assert.rejects(readFile(path.join(exportRoot, "data/runtime/secure/local-secret.key"), "utf8"));
+  await assert.rejects(readFile(path.join(exportRoot, "data/runtime/secure/credentials.json.enc"), "utf8"));
+});
+
 test("P7 source deletion, retention, export, legal drafts and full deletion work locally", async () => {
   const vaultRoot = await createTempVault();
   await mkdir(path.join(vaultRoot, "raw/imports/codex"), { recursive: true });
@@ -67,6 +82,44 @@ test("P7 source deletion, retention, export, legal drafts and full deletion work
   await savePrivacySecuritySettings(vaultRoot, { raw_retention_mode: "delete_after_days", raw_retention_days: 0 }, "2026-06-23T12:20:00.000Z");
   const retention = await applyRawRetentionPolicy(vaultRoot, new Date("2026-06-23T12:21:00.000Z"));
   assert.equal(retention.deleted_paths.includes("raw/archive/codex/old.md"), true);
+
+  await writeFile(path.join(vaultRoot, "raw/archive/codex/success.md"), "archive", "utf8");
+  await writeFile(path.join(vaultRoot, "raw/archive/codex/failed.md"), "archive", "utf8");
+  await mkdir(path.join(vaultRoot, "data/daily_runs"), { recursive: true });
+  await writeFile(path.join(vaultRoot, "data/daily_runs/success.json"), JSON.stringify({
+    schema_version: "daily_run.v1",
+    run_id: "success",
+    run_date: "2026-06-23",
+    status: "completed",
+    started_at: "2026-06-23T12:00:00.000Z",
+    finished_at: "2026-06-23T12:01:00.000Z",
+    source_apps: ["codex"],
+    imported_raw_paths: ["raw/archive/codex/success.md"],
+    normalized_record_ids: [],
+    generated_atom_ids: [],
+    errors: [],
+    created_at: "2026-06-23T12:00:00.000Z",
+    updated_at: "2026-06-23T12:01:00.000Z"
+  }), "utf8");
+  await writeFile(path.join(vaultRoot, "data/daily_runs/failed.json"), JSON.stringify({
+    schema_version: "daily_run.v1",
+    run_id: "failed",
+    run_date: "2026-06-23",
+    status: "failed",
+    started_at: "2026-06-23T12:00:00.000Z",
+    finished_at: "2026-06-23T12:01:00.000Z",
+    source_apps: ["codex"],
+    imported_raw_paths: ["raw/archive/codex/failed.md"],
+    normalized_record_ids: [],
+    generated_atom_ids: [],
+    errors: [],
+    created_at: "2026-06-23T12:00:00.000Z",
+    updated_at: "2026-06-23T12:01:00.000Z"
+  }), "utf8");
+  await savePrivacySecuritySettings(vaultRoot, { raw_retention_mode: "delete_after_successful_run" }, "2026-06-23T12:22:00.000Z");
+  const successRetention = await applyRawRetentionPolicy(vaultRoot, new Date("2026-06-23T12:23:00.000Z"));
+  assert.deepEqual(successRetention.deleted_paths, ["raw/archive/codex/success.md"]);
+  assert.match(await readFile(path.join(vaultRoot, "raw/archive/codex/failed.md"), "utf8"), /archive/);
 
   await writeFile(path.join(vaultRoot, "raw/archive/codex/new.md"), "archive", "utf8");
   const deletedSource = await deleteSourceData(vaultRoot, "codex");

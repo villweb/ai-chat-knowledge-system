@@ -18,8 +18,8 @@ import { buildKnowledgeAtomMarkdownDocument, renderKnowledgeAtomMarkdown } from 
 
 test("P6 filters knowledge atoms by query, source, type, project and tag", async () => {
   const vaultRoot = await createTempVault();
-  await writeAtom(vaultRoot, buildAtom({ atom_id: "atom_codex", title: "复盘方法", source_app: "codex", type: "方法", project: "personal", tags: ["review"] }));
-  await writeAtom(vaultRoot, buildAtom({ atom_id: "atom_cursor", title: "素材判断", source_app: "cursor", type: "素材", project: "writing", tags: ["material"] }));
+  await writeAtom(vaultRoot, buildAtom({ atom_id: "atom_codex", title: "复盘方法", source_app: "codex", type: "方法", project: "personal", tags: ["review"], review_status: "approved" }));
+  await writeAtom(vaultRoot, buildAtom({ atom_id: "atom_cursor", title: "素材判断", source_app: "cursor", type: "素材", project: "writing", tags: ["material"], review_status: "approved" }));
 
   const view = await buildKnowledgeLibraryView(vaultRoot);
   const filtered = filterKnowledgeAtoms(view.items, {
@@ -34,6 +34,25 @@ test("P6 filters knowledge atoms by query, source, type, project and tag", async
   assert.equal(filtered[0]?.atom.atom_id, "atom_codex");
   assert.equal(view.facets.source_apps.find((item) => item.value === "codex")?.count, 1);
   assert.equal(view.facets.tags.find((item) => item.value === "review")?.count, 1);
+});
+
+test("P6 knowledge library defaults to approved atoms and markdown export excludes drafts", async () => {
+  const vaultRoot = await createTempVault();
+  await writeAtom(vaultRoot, buildAtom({ atom_id: "atom_approved", title: "已批准知识", review_status: "approved" }));
+  await writeAtom(vaultRoot, buildAtom({ atom_id: "atom_pending", title: "待确认草稿", review_status: "pending" }));
+  await writeAtom(vaultRoot, buildAtom({ atom_id: "atom_rejected", title: "已拒绝内容", review_status: "rejected" }));
+
+  const defaultView = await buildKnowledgeLibraryView(vaultRoot);
+  assert.deepEqual(defaultView.items.map((item) => item.atom.atom_id), ["atom_approved"]);
+
+  const allStatusView = await buildKnowledgeLibraryView(vaultRoot, { review_status: "" });
+  assert.equal(allStatusView.items.length, 3);
+
+  const exported = await exportKnowledgeMarkdown(vaultRoot, new Date("2026-06-23T10:00:00.000Z"));
+  assert.equal(exported.exported_file_count, 1);
+  const index = await readFile(path.join(vaultRoot, exported.index_path), "utf8");
+  assert.match(index, /已批准知识/);
+  assert.doesNotMatch(index, /待确认草稿|已拒绝内容/);
 });
 
 test("P6 duplicate groups ignore rejected and merged atoms", async () => {

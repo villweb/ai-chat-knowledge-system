@@ -8,6 +8,8 @@ import {
   CalendarClock,
   CalendarDays,
   Check,
+  ChevronDown,
+  ChevronRight,
   Clock,
   Database,
   Download,
@@ -34,13 +36,20 @@ import {
   X
 } from "lucide-react";
 import "./styles.css";
-import { FirstTimeBanner, HelpTip, HintText, SectionHeading } from "./help-components";
+import {
+  AI_PROVIDER_PRESETS,
+  findPresetById,
+  resolvePresetId,
+  type AiProviderPresetId
+} from "../ai-provider-presets";
+import { FieldLabel, FirstTimeBanner, HelpTip, HintText, SectionHeading } from "./help-components";
 
 type ReviewStatus = "pending" | "approved" | "rejected" | "merged";
 type KnowledgeAtomType = "观点" | "方法" | "决策" | "经验" | "素材" | "问题" | "偏好";
 type NavKey = "guide" | "sources" | "import" | "run" | "library" | "privacy" | "commercial" | "pending" | "detail" | "settings" | "logs";
 type SourceConnectorStatus = "available" | "reserved";
-type PipelinePhase = "idle" | "importing" | "processing" | "waiting_review" | "done";
+type PipelinePhase = "idle" | "importing" | "processing" | "waiting_review" | "done" | "failed";
+type PipelineSubstep = "copying" | "normalizing" | "extracting" | null;
 type RawRetentionMode = "keep_forever" | "delete_after_days" | "delete_after_successful_run";
 type FeedbackCategory = "bug" | "feature" | "billing" | "other";
 
@@ -195,7 +204,10 @@ interface SensitiveScanResult {
 
 interface PipelineState {
   phase: PipelinePhase;
+  substep?: PipelineSubstep;
   label: string;
+  error?: string | null;
+  can_retry?: boolean;
   updated_at: string;
 }
 
@@ -281,6 +293,7 @@ interface DesktopState {
   vaultRoot: string;
   sourceApp: string;
   aiProvider: string;
+  aiProviderPreset?: string;
   aiBaseUrl?: string;
   aiModel?: string;
   apiKeyConfigured: boolean;
@@ -299,6 +312,7 @@ interface DesktopState {
 interface SessionConfigInput {
   sourceApp: string;
   aiProvider: string;
+  aiProviderPreset?: string;
   baseUrl?: string;
   model?: string;
   apiKey: string;
@@ -318,6 +332,7 @@ interface DesktopApi {
   getState(): Promise<DesktopState>;
   chooseVault(): Promise<DesktopState>;
   chooseImportFiles(sourceApp: string): Promise<ImportResult>;
+  retryImport(): Promise<ImportResult>;
   runImport(): Promise<unknown>;
   runDaily(): Promise<unknown>;
   listAtoms(): Promise<KnowledgeAtomDocument[]>;
@@ -359,32 +374,40 @@ declare global {
   }
 }
 
-const desktopApi = getDesktopApi();
+let previewDesktopApi: DesktopApi | null = null;
+
+function isDesktopRuntime(): boolean {
+  return Boolean(window.desktopApi);
+}
 
 const PRODUCT_GUIDE_DISMISS_KEY = "ai-kb-product-guide-dismissed";
 
-const flowJourneySteps = [
-  { step: 1, label: "导入对话", hint: "选择 AI 聊天导出文件", why: "从已有对话开始沉淀个人知识" },
-  { step: 2, label: "AI 提炼候选", hint: "自动标准化并生成候选知识", why: "AI 只生成草稿，不会直接写入正式库" },
-  { step: 3, label: "你确认质量", hint: "批准或拒绝每条候选", why: "避免错误内容自动入库，保护隐私与质量" },
-  { step: 4, label: "知识库使用", hint: "搜索、导出、同步 Obsidian", why: "已批准的知识在这里长期使用" }
+const pipelineSubsteps = [
+  { key: "copying", label: "复制中" },
+  { key: "normalizing", label: "标准化" },
+  { key: "extracting", label: "AI 提炼" }
+] as const;
+
+// 主栏：高频操作（导入、确认、知识库、运行、详情）
+const primaryNavItems: Array<{ key: NavKey; label: string; icon: React.ComponentType<{ size?: number }> }> = [
+  { key: "import", label: "导入", icon: FileInput },
+  { key: "pending", label: "待确认", icon: ListChecks },
+  { key: "library", label: "知识库", icon: BookOpenCheck },
+  { key: "run", label: "运行", icon: Play },
+  { key: "detail", label: "详情", icon: SquarePen }
 ];
 
-const flowJourneyPageKeys: NavKey[] = ["import", "run", "pending", "library", "detail"];
-
-const navItems: Array<{ key: NavKey; label: string; icon: React.ComponentType<{ size?: number }> }> = [
+// 更多：配置来源与低频管理
+const secondaryNavItems: Array<{ key: NavKey; label: string; icon: React.ComponentType<{ size?: number }> }> = [
   { key: "guide", label: "引导", icon: BookOpenCheck },
   { key: "sources", label: "来源", icon: Database },
-  { key: "import", label: "导入", icon: FileInput },
-  { key: "run", label: "运行", icon: Play },
-  { key: "library", label: "知识库", icon: BookOpenCheck },
   { key: "privacy", label: "隐私", icon: Lock },
-  { key: "commercial", label: "商业", icon: BadgeCheck },
-  { key: "pending", label: "待确认", icon: ListChecks },
-  { key: "detail", label: "详情", icon: SquarePen },
   { key: "settings", label: "设置", icon: Settings },
-  { key: "logs", label: "日志", icon: Archive }
+  { key: "logs", label: "日志", icon: Archive },
+  { key: "commercial", label: "商业", icon: BadgeCheck }
 ];
+
+const allNavItems = [...primaryNavItems, ...secondaryNavItems];
 
 const typeOptions: KnowledgeAtomType[] = ["观点", "方法", "决策", "经验", "素材", "问题", "偏好"];
 
@@ -401,6 +424,15 @@ function getDesktopApi(): DesktopApi {
     return window.desktopApi;
   }
 
+  if (previewDesktopApi) {
+    return previewDesktopApi;
+  }
+
+  previewDesktopApi = createPreviewDesktopApi();
+  return previewDesktopApi;
+}
+
+function createPreviewDesktopApi(): DesktopApi {
   const sampleAtom: KnowledgeAtomDocument = {
     file_path: "knowledge/inbox/2026/preview-atom.md",
     atom: {
@@ -464,12 +496,11 @@ function getDesktopApi(): DesktopApi {
       return previewState;
     },
     async chooseImportFiles() {
+      throw new Error("当前为浏览器预览模式，无法打开文件选择框。请使用 npm run desktop:dev 或安装版桌面应用。");
+    },
+    async retryImport() {
       return {
         copied_file_count: 1,
-        copied_file_names: ["preview-chat.md"],
-        source_app: "codex",
-        import_path: "raw/imports/codex",
-        auto_processed: true,
         pending_atom_count: 1,
         total_atom_count: previewState.atoms.length
       };
@@ -640,7 +671,16 @@ function getDesktopApi(): DesktopApi {
     async saveSessionConfig(input) {
       previewState.sourceApp = input.sourceApp;
       previewState.aiProvider = input.aiProvider;
-      previewState.apiKeyConfigured = Boolean(input.apiKey);
+      if (input.aiProviderPreset !== undefined) {
+        previewState.aiProviderPreset = input.aiProviderPreset;
+      }
+      if (input.baseUrl !== undefined) {
+        previewState.aiBaseUrl = input.baseUrl;
+      }
+      if (input.model !== undefined) {
+        previewState.aiModel = input.model;
+      }
+      previewState.apiKeyConfigured = Boolean(input.apiKey) || previewState.apiKeyConfigured;
       return previewState;
     }
   };
@@ -873,10 +913,46 @@ function App() {
     nextPendingId: string;
   } | null>(null);
   const [lastRunResult, setLastRunResult] = useState<DailyRunResult | null>(null);
+  const [moreNavOpen, setMoreNavOpen] = useState(() => {
+    try {
+      return localStorage.getItem("ai-kb-more-nav-open") === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    if (secondaryNavItems.some((item) => item.key === active)) {
+      setMoreNavOpen(true);
+    }
+  }, [active]);
 
   useEffect(() => {
     void refresh();
   }, []);
+
+  // 处理进行中轮询流水线子步骤
+  useEffect(() => {
+    if (!busy) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      void (async () => {
+        try {
+          const nextState = await getDesktopApi().getState() as DesktopState;
+          if (!nextState.pipeline) {
+            return;
+          }
+          setState((previous) => (previous ? { ...previous, pipeline: nextState.pipeline! } : previous));
+        } catch {
+          // 轮询失败时忽略，避免打断主流程
+        }
+      })();
+    }, 400);
+
+    return () => window.clearInterval(timer);
+  }, [busy]);
 
   const selected = useMemo(() => {
     return state?.atoms.find((item) => item.atom.atom_id === selectedId) ?? state?.atoms[0] ?? null;
@@ -893,21 +969,21 @@ function App() {
   }, [state]);
 
   const pipeline = useMemo(() => {
-    if (busy) {
-      return { phase: "processing" as PipelinePhase, label: "正在处理" };
+    if (state?.pipeline && (busy || state.pipeline.phase === "failed" || state.pipeline.substep)) {
+      return state.pipeline;
     }
     if (counts.pending > 0) {
-      return { phase: "waiting_review" as PipelinePhase, label: "等待审查" };
+      return { phase: "waiting_review" as PipelinePhase, label: "等待审查", updated_at: new Date().toISOString() };
     }
     if (state?.pipeline && state.pipeline.phase !== "waiting_review") {
       return state.pipeline;
     }
-    return { phase: "idle" as PipelinePhase, label: "空闲" };
+    return { phase: "idle" as PipelinePhase, label: "空闲", updated_at: new Date().toISOString() };
   }, [busy, counts.pending, state?.pipeline]);
 
   async function refresh() {
     try {
-      const nextState = await desktopApi.getState() as DesktopState;
+      const nextState = await getDesktopApi().getState() as DesktopState;
       setBootError("");
       setState(nextState);
       if (!hasInitializedNav) {
@@ -942,25 +1018,6 @@ function App() {
     setLibraryFocusAtomIds(ids);
     setActive("library");
     setReviewSuccess(null);
-  }
-
-  function computeFlowStep(): number {
-    if (active === "library") {
-      return 4;
-    }
-    if (active === "pending" || active === "detail") {
-      return 3;
-    }
-    if (active === "run" || (active === "import" && busy)) {
-      return 2;
-    }
-    if (counts.pending > 0) {
-      return 3;
-    }
-    if (counts.approved > 0) {
-      return 4;
-    }
-    return 1;
   }
 
   function formatImportSuccess(result: ImportResult): string {
@@ -1047,7 +1104,7 @@ function App() {
     setNotice(`${reviewLabel}，全部待确认已处理完毕。`);
   }
 
-  async function handleAtomReview(input: AtomUpdateInput) {
+  async function handleAtomReview(input: AtomUpdateInput, options?: { stayOnList?: boolean }) {
     setBusy(true);
     setNotice("");
     setNoticeKind("info");
@@ -1057,13 +1114,13 @@ function App() {
       .map((item) => item.atom.atom_id);
 
     try {
-      const updateResult = await desktopApi.updateAtom(input) as KnowledgeAtomDocument & {
+      const updateResult = await getDesktopApi().updateAtom(input) as KnowledgeAtomDocument & {
         atoms?: KnowledgeAtomDocument[];
         knowledge?: KnowledgeLibraryView;
       };
       setImportBatchAtomIds((previous) => previous.filter((id) => id !== reviewedAtomId));
 
-      const nextAtoms = updateResult.atoms ?? (await desktopApi.listAtoms());
+      const nextAtoms = updateResult.atoms ?? (await getDesktopApi().listAtoms());
       const nextKnowledge = updateResult.knowledge ?? (state?.knowledge ?? {
         items: [],
         facets: { source_apps: [], types: [], projects: [], tags: [], statuses: [] },
@@ -1081,6 +1138,21 @@ function App() {
           knowledge: nextKnowledge
         };
       });
+
+      if (options?.stayOnList) {
+        const freshPending = nextAtoms.filter((item) => item.atom.review_status === "pending");
+        const reviewLabel = reviewStatusLabel(input.review_status);
+        if (input.review_status === "approved") {
+          setRecentlyApprovedIds((previous) => [reviewedAtomId, ...previous.filter((id) => id !== reviewedAtomId)]);
+        }
+        if (freshPending.length > 0) {
+          setNotice(`${reviewLabel}，剩余 ${freshPending.length} 条待确认。`);
+        } else {
+          setNotice(`${reviewLabel}，全部待确认已处理完毕。`);
+        }
+        setActive("pending");
+        return;
+      }
 
       await applyReviewNavigation(reviewedAtomId, pendingBefore, nextAtoms, input.review_status);
     } catch (error) {
@@ -1139,14 +1211,36 @@ function App() {
     }
   }
 
-  async function handleImport() {
+  function confirmDestructive(message: string): boolean {
+    return window.confirm(message);
+  }
+
+  function confirmDeleteAllUserData(): boolean {
+    const value = window.prompt("彻底删除会移除知识库、原始记录、运行记录、日志、导出和备份。请输入“确认删除”继续。");
+    return value === "确认删除";
+  }
+
+  async function handleImport(sourceApp?: string) {
+    if (!isDesktopRuntime()) {
+      setNotice("当前为浏览器预览模式，无法打开文件选择框。请使用 npm run desktop:dev 或安装版桌面应用。");
+      setNoticeKind("error");
+      return;
+    }
+
+    const targetSource = (sourceApp ?? state!.sourceApp).trim();
+    if (!targetSource) {
+      setNotice("没有可用的导入来源，请先在「来源」页启用至少一个连接器。");
+      setNoticeKind("error");
+      return;
+    }
     setBusy(true);
-    setNotice("");
+    setNotice("正在打开文件选择框...");
     setNoticeKind("info");
     try {
-      const result = await desktopApi.chooseImportFiles(state!.sourceApp) as ImportResult;
+      const result = await getDesktopApi().chooseImportFiles(targetSource) as ImportResult;
       if (!result.copied_file_count) {
         setNotice("未选择文件。");
+        setNoticeKind("info");
         return;
       }
       setNotice(formatImportSuccess(result));
@@ -1164,9 +1258,60 @@ function App() {
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
       setNoticeKind("error");
+      await refresh();
     } finally {
       setBusy(false);
     }
+  }
+
+  async function handleRetryImport() {
+    setBusy(true);
+    setNotice("");
+    setNoticeKind("info");
+    try {
+      const result = await getDesktopApi().retryImport() as ImportResult;
+      setNotice(formatImportSuccess(result));
+      setImportBatchAtomIds(result.import_batch_atom_ids ?? []);
+      await refresh();
+      if ((result.pending_atom_count ?? 0) > 0) {
+        setActive("pending");
+      }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+      setNoticeKind("error");
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function toggleMoreNav() {
+    setMoreNavOpen((current) => {
+      const next = !current;
+      try {
+        localStorage.setItem("ai-kb-more-nav-open", next ? "1" : "0");
+      } catch {
+        // 忽略本地存储不可用
+      }
+      return next;
+    });
+  }
+
+  function renderNavButton(item: { key: NavKey; label: string; icon: React.ComponentType<{ size?: number }> }) {
+    const Icon = item.icon;
+    const showBadge = item.key === "pending" && counts.pending > 0;
+    return (
+      <button
+        key={item.key}
+        className={active === item.key ? "nav active" : "nav"}
+        onClick={() => setActive(item.key)}
+        title={item.label}
+      >
+        <Icon size={18} />
+        <span>{item.label}</span>
+        {showBadge && <span className="navBadge">{counts.pending}</span>}
+      </button>
+    );
   }
 
   if (!state) {
@@ -1196,22 +1341,22 @@ function App() {
           </div>
         </div>
         <nav>
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const showBadge = item.key === "pending" && counts.pending > 0;
-            return (
-              <button key={item.key} className={active === item.key ? "nav active" : "nav"} onClick={() => setActive(item.key)} title={item.label}>
-                <Icon size={18} />
-                <span>{item.label}</span>
-                {showBadge && <span className="navBadge">{counts.pending}</span>}
-              </button>
-            );
-          })}
+          {primaryNavItems.map(renderNavButton)}
+          <button
+            type="button"
+            className={moreNavOpen ? "nav navMoreToggle open" : "nav navMoreToggle"}
+            onClick={toggleMoreNav}
+            title="展开或收起高级功能"
+          >
+            {moreNavOpen ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+            <span>更多</span>
+          </button>
+          {moreNavOpen && <div className="navSecondary">{secondaryNavItems.map(renderNavButton)}</div>}
         </nav>
         <div className="vaultBox">
           <span>知识库</span>
           <strong>{compactPath(state.vaultRoot)}</strong>
-          <button className="iconText" onClick={() => withBusy(() => desktopApi.chooseVault(), "知识库位置已更新")} disabled={busy} title="选择本地知识库存放目录">
+          <button className="iconText" onClick={() => withBusy(() => getDesktopApi().chooseVault(), "知识库位置已更新")} disabled={busy} title="选择本地知识库存放目录">
             <FolderOpen size={16} />
             <span>选择</span>
           </button>
@@ -1225,7 +1370,12 @@ function App() {
             <p>{subtitleFor(active)}</p>
           </div>
           <div className="topbarActions">
-            <PipelineStatusBar pipeline={pipeline} pendingCount={counts.pending} />
+            <PipelineStatusBar
+              pipeline={pipeline}
+              pendingCount={counts.pending}
+              {...(pipeline.can_retry ? { onRetry: () => { void handleRetryImport(); } } : {})}
+              busy={busy}
+            />
             {counts.pending > 0 && active !== "pending" && (
               <button
                 className="primary nextAction"
@@ -1239,20 +1389,10 @@ function App() {
               </button>
             )}
             <button className="iconOnly" onClick={() => void refresh()} title="刷新" disabled={busy}>
-              <RefreshCw size={18} />
+              <RefreshCw size={16} />
             </button>
           </div>
         </header>
-
-        {flowJourneyPageKeys.includes(active) && (
-          <FlowJourneyStrip
-            steps={flowJourneySteps}
-            activeStep={computeFlowStep()}
-            onGoImport={() => setActive("import")}
-            onGoPending={() => setActive("pending")}
-            onGoLibrary={() => goToLibrary()}
-          />
-        )}
 
         {reviewSuccess && (
           <ReviewSuccessBanner
@@ -1278,21 +1418,29 @@ function App() {
         {notice && <div className={noticeKind === "error" ? "notice error" : "notice"}>{notice}</div>}
 
         {active === "guide" && <GuidePanel state={state} counts={counts} onGoImport={() => setActive("import")} onGoPending={() => setActive("pending")} />}
-        {active === "sources" && <SourcesPanel connectors={state.connectors} sourceApp={state.sourceApp} busy={busy} onToggle={(sourceApp, enabled) => withBusy(() => desktopApi.setConnectorEnabled({ sourceApp, enabled }), "连接器状态已更新")} />}
+        {active === "sources" && <SourcesPanel connectors={state.connectors} sourceApp={state.sourceApp} busy={busy} onToggle={(sourceApp, enabled) => withBusy(() => getDesktopApi().setConnectorEnabled({ sourceApp, enabled }), "连接器状态已更新")} />}
         {active === "import" && (
           <ImportPanel
             busy={busy}
+            isDesktopRuntime={isDesktopRuntime()}
             sourceApp={state.sourceApp}
+            connectors={state.connectors}
             aiProvider={state.aiProvider}
+            pipeline={pipeline}
             importPath={`raw/imports/${state.sourceApp}`}
             isEmptyVault={state.atoms.length === 0}
             productGuideDismissed={productGuideDismissed}
             onDismissProductGuide={dismissProductGuide}
             onGoPending={() => setActive("pending")}
             onGoLibrary={() => goToLibrary()}
-            onImport={() => void handleImport()}
+            onImport={(source) => void handleImport(source)}
+            onImportBlocked={(message) => {
+              setNotice(message);
+              setNoticeKind("error");
+            }}
+            onRetryImport={() => void handleRetryImport()}
             onGoSettings={() => setActive("settings")}
-            onRunNormalize={() => withBusy(() => desktopApi.runImport(), "标准化完成，请到「待确认」查看结果。")}
+            onRunNormalize={() => withBusy(() => getDesktopApi().runImport(), "标准化完成，请到「待确认」查看结果。")}
           />
         )}
         {active === "run" && (
@@ -1301,11 +1449,11 @@ function App() {
             events={state.events}
             automation={state.automation}
             lastRunResult={lastRunResult}
-            onRun={() => handleRunDaily(() => desktopApi.runDaily())}
-            onSaveAutomation={(input) => withBusy(() => desktopApi.saveAutomationSettings(input), "定时自动沉淀设置已保存")}
-            onConfirmAutomation={() => handleRunDaily(() => desktopApi.confirmAutomationRun(), { clearNotice: false })}
-            onSkipAutomation={() => withBusy(() => desktopApi.skipAutomationRun(), "已跳过本次自动运行")}
-            onRerunDate={(runDate) => handleRunDaily(() => desktopApi.rerunAutomationDate({ run_date: runDate }))}
+            onRun={() => handleRunDaily(() => getDesktopApi().runDaily())}
+            onSaveAutomation={(input) => withBusy(() => getDesktopApi().saveAutomationSettings(input), "定时自动沉淀设置已保存")}
+            onConfirmAutomation={() => handleRunDaily(() => getDesktopApi().confirmAutomationRun(), { clearNotice: false })}
+            onSkipAutomation={() => withBusy(() => getDesktopApi().skipAutomationRun(), "已跳过本次自动运行")}
+            onRerunDate={(runDate) => handleRunDaily(() => getDesktopApi().rerunAutomationDate({ run_date: runDate }))}
             onGoPending={() => setActive("pending")}
             onGoLibrary={() => goToLibrary()}
             onGoLogs={() => setActive("logs")}
@@ -1320,11 +1468,15 @@ function App() {
             recentlyApprovedIds={recentlyApprovedIds}
             onClearFocus={() => setLibraryFocusAtomIds([])}
             onSelect={(atomId) => { setSelectedId(atomId); setActive("detail"); }}
-            onMerge={(atomId, targetId) => withBusy(() => desktopApi.updateAtom({ atom_id: atomId, review_status: "merged", merged_into: targetId }), "知识已合并")}
-            onExport={() => withBusy(() => desktopApi.exportKnowledgeMarkdown(), "Markdown 导出完成")}
-            onObsidian={() => withBusy(() => desktopApi.ensureObsidianCompatibility(), "Obsidian 索引已更新")}
-            onBackup={() => withBusy(() => desktopApi.backupKnowledge(), "知识库备份已创建")}
-            onRestore={() => withBusy(() => desktopApi.restoreLatestKnowledgeBackup(), "最近备份已恢复")}
+            onMerge={(atomId, targetId) => withBusy(() => getDesktopApi().updateAtom({ atom_id: atomId, review_status: "merged", merged_into: targetId }), "知识已合并")}
+            onExport={() => withBusy(() => getDesktopApi().exportKnowledgeMarkdown(), "Markdown 导出完成")}
+            onObsidian={() => withBusy(() => getDesktopApi().ensureObsidianCompatibility(), "Obsidian 索引已更新")}
+            onBackup={() => withBusy(() => getDesktopApi().backupKnowledge(), "知识库备份已创建")}
+            onRestore={() => {
+              if (confirmDestructive("恢复最近备份会覆盖当前知识库、运行记录和日志。确认继续？")) {
+                void withBusy(() => getDesktopApi().restoreLatestKnowledgeBackup(), "最近备份已恢复");
+              }
+            }}
           />
         )}
         {active === "privacy" && (
@@ -1332,22 +1484,34 @@ function App() {
             privacy={state.privacy}
             connectors={state.connectors}
             busy={busy}
-            onSaveSettings={(input) => withBusy(() => desktopApi.savePrivacySettings(input), "隐私和安全设置已保存")}
-            onScan={(content) => desktopApi.scanSensitiveContent({ content })}
-            onApplyRetention={() => withBusy(() => desktopApi.applyRawRetention(), "原始记录保留策略已执行")}
-            onDeleteSource={(sourceApp) => withBusy(() => desktopApi.deleteSourceData({ source_app: sourceApp }), "来源数据已删除")}
-            onExportUserData={() => withBusy(() => desktopApi.exportUserData(), "用户数据导出完成")}
-            onDeleteAllUserData={() => withBusy(() => desktopApi.deleteAllUserData(), "本地用户数据已删除")}
-            onWriteLegalDrafts={() => withBusy(() => desktopApi.writePrivacyLegalDrafts(), "隐私政策和用户协议草案已生成")}
+            onSaveSettings={(input) => withBusy(() => getDesktopApi().savePrivacySettings(input), "隐私和安全设置已保存")}
+            onScan={(content) => getDesktopApi().scanSensitiveContent({ content })}
+            onApplyRetention={() => {
+              if (confirmDestructive("执行保留策略会按当前设置删除匹配的原始归档文件。确认继续？")) {
+                void withBusy(() => getDesktopApi().applyRawRetention(), "原始记录保留策略已执行");
+              }
+            }}
+            onDeleteSource={(sourceApp) => {
+              if (confirmDestructive(`删除来源数据会移除 ${sourceApp} 的导入文件和归档原始记录。确认继续？`)) {
+                void withBusy(() => getDesktopApi().deleteSourceData({ source_app: sourceApp }), "来源数据已删除");
+              }
+            }}
+            onExportUserData={() => withBusy(() => getDesktopApi().exportUserData(), "用户数据导出完成")}
+            onDeleteAllUserData={() => {
+              if (confirmDeleteAllUserData()) {
+                void withBusy(() => getDesktopApi().deleteAllUserData(), "本地用户数据已删除");
+              }
+            }}
+            onWriteLegalDrafts={() => withBusy(() => getDesktopApi().writePrivacyLegalDrafts(), "隐私政策和用户协议草案已生成")}
           />
         )}
         {active === "commercial" && (
           <CommercialPanel
             commercial={state.commercial}
             busy={busy}
-            onActivate={(activationCode) => withBusy(() => desktopApi.activateLicense({ activation_code: activationCode }), "授权状态已更新")}
-            onSaveAccount={(accountEmail) => withBusy(() => desktopApi.saveCommercialAccount({ account_email: accountEmail }), "账号入口已保存")}
-            onCreateFeedback={(input) => withBusy(() => desktopApi.createFeedbackDraft(input), "反馈草稿已创建")}
+            onActivate={(activationCode) => withBusy(() => getDesktopApi().activateLicense({ activation_code: activationCode }), "授权状态已更新")}
+            onSaveAccount={(accountEmail) => withBusy(() => getDesktopApi().saveCommercialAccount({ account_email: accountEmail }), "账号入口已保存")}
+            onCreateFeedback={(input) => withBusy(() => getDesktopApi().createFeedbackDraft(input), "反馈草稿已创建")}
           />
         )}
         {active === "pending" && (
@@ -1357,8 +1521,10 @@ function App() {
             query={query}
             selectedId={selected?.atom.atom_id ?? ""}
             importBatchAtomIds={importBatchAtomIds}
+            busy={busy}
             onQuery={setQuery}
             onSelect={(atomId) => { setSelectedId(atomId); setActive("detail"); }}
+            onInlineReview={(input) => void handleAtomReview(input, { stayOnList: true })}
             onClearImportBatch={() => setImportBatchAtomIds([])}
             onGoLibrary={() => goToLibrary()}
           />
@@ -1368,11 +1534,11 @@ function App() {
             document={selected}
             atoms={state.atoms}
             busy={busy}
-            onUpdate={(input) => withBusy(() => desktopApi.updateAtom(input), "知识已更新")}
+            onUpdate={(input) => withBusy(() => getDesktopApi().updateAtom(input), "知识已更新")}
             onReview={(input) => void handleAtomReview(input)}
           />
         )}
-        {active === "settings" && <SettingsPanel state={state} busy={busy} onSave={(input) => withBusy(() => desktopApi.saveSessionConfig(input), "会话配置已保存")} onCheckUpdates={() => withBusy(() => desktopApi.checkForUpdates(), "更新检查完成")} />}
+        {active === "settings" && <SettingsPanel state={state} busy={busy} onSave={(input) => withBusy(() => getDesktopApi().saveSessionConfig(input), "会话配置已保存")} onCheckUpdates={() => withBusy(() => getDesktopApi().checkForUpdates(), "更新检查完成")} />}
         {active === "logs" && <LogsPanel logs={[...state.events, ...state.logs]} />}
       </section>
     </main>
@@ -1387,58 +1553,7 @@ function FixtureModeBanner({ onGoSettings }: { onGoSettings: () => void }) {
         <strong>当前为本地测试模式，不调用外部 AI API，不消耗 DeepSeek 额度</strong>
         <span>提炼结果由本地模板生成。如需真实 AI 提炼，请前往「设置」切换为「真实 AI API」并配置 DeepSeek。</span>
       </div>
-      <button className="secondary" onClick={onGoSettings}><Settings size={16} />去设置</button>
-    </div>
-  );
-}
-
-function FlowJourneyStrip({
-  steps,
-  activeStep,
-  onGoImport,
-  onGoPending,
-  onGoLibrary
-}: {
-  steps: Array<{ step: number; label: string; hint: string; why: string }>;
-  activeStep: number;
-  onGoImport: () => void;
-  onGoPending: () => void;
-  onGoLibrary: () => void;
-}) {
-  return (
-    <div className="flowJourneyStrip">
-      <div className="flowJourneySteps">
-        {steps.map((item) => {
-          const isActive = activeStep === item.step;
-          const isDone = activeStep > item.step;
-          return (
-            <button
-              key={item.step}
-              type="button"
-              className={[
-                "flowJourneyStep",
-                isActive ? "active" : "",
-                isDone ? "done" : ""
-              ].filter(Boolean).join(" ")}
-              onClick={() => {
-                if (item.step <= 1) {
-                  onGoImport();
-                } else if (item.step <= 3) {
-                  onGoPending();
-                } else {
-                  onGoLibrary();
-                }
-              }}
-            >
-              <span className="stepNumber">{item.step}</span>
-              <div>
-                <strong>{item.label}</strong>
-                <small>{isActive ? item.why : item.hint}</small>
-              </div>
-            </button>
-          );
-        })}
-      </div>
+      <button className="primarySoft" onClick={onGoSettings}><Settings size={16} />去设置</button>
     </div>
   );
 }
@@ -1468,7 +1583,7 @@ function ReviewSuccessBanner({
       <div className="reviewSuccessActions">
         <button className="primary" onClick={onGoLibrary} title="查看刚批准的知识"><BookOpenCheck size={16} />去知识库查看</button>
         {remainingPending > 0 && (
-          <button onClick={onContinueReview} title="继续审查下一条待确认"><ListChecks size={16} />继续审查下一条</button>
+          <button className="secondary" onClick={onContinueReview} title="继续审查下一条待确认"><ListChecks size={16} />继续审查下一条</button>
         )}
         <button className="iconOnly" onClick={onDismiss} title="关闭"><X size={16} /></button>
       </div>
@@ -1492,12 +1607,51 @@ function ProductGuideCard({ onDismiss }: { onDismiss: () => void }) {
   );
 }
 
-function PipelineStatusBar({ pipeline, pendingCount }: { pipeline: { phase: PipelinePhase; label: string }; pendingCount: number }) {
+function PipelineStatusBar({
+  pipeline,
+  pendingCount,
+  onRetry,
+  busy
+}: {
+  pipeline: PipelineState;
+  pendingCount: number;
+  onRetry?: () => void;
+  busy?: boolean;
+}) {
+  const activeSubstepIndex = pipeline.substep
+    ? pipelineSubsteps.findIndex((item) => item.key === pipeline.substep)
+    : -1;
+  const showSubsteps = pipeline.phase === "importing" || pipeline.phase === "processing" || Boolean(pipeline.substep);
+
   return (
-    <div className={`pipelineStatus phase-${pipeline.phase}`}>
-      <Clock size={15} />
-      <span>{pipeline.label}</span>
-      {pendingCount > 0 && <span className="pipelineMeta">待确认 {pendingCount}</span>}
+    <div className={`pipelineStatusWrap phase-${pipeline.phase}`}>
+      <div className={`pipelineStatus phase-${pipeline.phase}`}>
+        <Clock size={15} />
+        <span>{pipeline.label}</span>
+        {pendingCount > 0 && pipeline.phase !== "failed" && <span className="pipelineMeta">待确认 {pendingCount}</span>}
+        {pipeline.phase === "failed" && onRetry && (
+          <button type="button" className="pipelineRetry" onClick={onRetry} disabled={busy} title="从标准化步骤重试处理">
+            <RefreshCw size={14} />
+            <span>重试</span>
+          </button>
+        )}
+      </div>
+      {showSubsteps && (
+        <div className="pipelineSubsteps" aria-label="处理进度">
+          {pipelineSubsteps.map((item, index) => {
+            const isDone = activeSubstepIndex > index;
+            const isActive = activeSubstepIndex === index;
+            return (
+              <span
+                key={item.key}
+                className={["pipelineSubstep", isDone ? "done" : "", isActive ? "active" : ""].filter(Boolean).join(" ")}
+              >
+                {item.label}
+              </span>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -1525,7 +1679,7 @@ function GuidePanel({
         </div>
         <div className="actions" style={{ marginTop: 14 }}>
           <button className="primary" onClick={onGoImport}><FileInput size={16} />导入聊天文件</button>
-          {counts.pending > 0 && <button onClick={onGoPending}><ListChecks size={16} />审查待确认 ({counts.pending})</button>}
+          {counts.pending > 0 && <button className="secondary" onClick={onGoPending}><ListChecks size={16} />审查待确认 ({counts.pending})</button>}
         </div>
       </section>
       <section className="panel">
@@ -1591,8 +1745,11 @@ function SourcesPanel({ connectors, sourceApp, busy, onToggle }: { connectors: S
 
 function ImportPanel({
   busy,
+  isDesktopRuntime,
   sourceApp,
+  connectors,
   aiProvider,
+  pipeline,
   importPath,
   isEmptyVault,
   productGuideDismissed,
@@ -1600,22 +1757,62 @@ function ImportPanel({
   onGoPending,
   onGoLibrary,
   onImport,
+  onImportBlocked,
+  onRetryImport,
   onGoSettings,
   onRunNormalize
 }: {
   busy: boolean;
+  isDesktopRuntime: boolean;
   sourceApp: string;
+  connectors: SourceConnectorView[];
   aiProvider: string;
+  pipeline: PipelineState;
   importPath: string;
   isEmptyVault: boolean;
   productGuideDismissed: boolean;
   onDismissProductGuide: () => void;
   onGoPending: () => void;
   onGoLibrary: () => void;
-  onImport: () => void;
+  onImport: (sourceApp: string) => void;
+  onImportBlocked: (message: string) => void;
+  onRetryImport: () => void;
   onGoSettings: () => void;
   onRunNormalize: () => void;
 }) {
+  const availableConnectors = connectors.filter((connector) => connector.status === "available" && connector.enabled);
+  const [selectedSource, setSelectedSource] = useState(sourceApp);
+
+  // 来源下拉必须与已启用连接器保持一致，避免向 IPC 传入停用来源导致选文件前即失败
+  const resolvedImportSource = useMemo(() => {
+    if (availableConnectors.some((connector) => connector.source_app === selectedSource)) {
+      return selectedSource;
+    }
+    const preferred = availableConnectors.find((connector) => connector.source_app === sourceApp);
+    return preferred?.source_app ?? availableConnectors[0]?.source_app ?? "";
+  }, [availableConnectors, selectedSource, sourceApp]);
+
+  useEffect(() => {
+    if (resolvedImportSource && resolvedImportSource !== selectedSource) {
+      setSelectedSource(resolvedImportSource);
+    }
+  }, [resolvedImportSource, selectedSource]);
+
+  const canImport = isDesktopRuntime && Boolean(resolvedImportSource) && !busy;
+  const selectedImportPath = resolvedImportSource ? `raw/imports/${resolvedImportSource}` : "—";
+
+  function handleImportClick() {
+    if (!isDesktopRuntime) {
+      onImportBlocked("当前为浏览器预览模式，无法打开文件选择框。请使用 npm run desktop:dev 或安装版桌面应用。");
+      return;
+    }
+    if (!resolvedImportSource) {
+      onImportBlocked("没有可用的导入来源，请先在「来源」页启用至少一个可用平台。");
+      return;
+    }
+    onImport(resolvedImportSource);
+  }
+
   return (
     <div className="grid two">
       <section className="panel">
@@ -1630,6 +1827,12 @@ function ImportPanel({
           help="支持 Markdown、TXT、JSON 格式的 AI 聊天导出文件。"
         />
         <p className="panelPurpose">导入后 AI 会生成候选，你确认后进入知识库永久保存。</p>
+        {!isDesktopRuntime && (
+          <div className="importAiNotice warning">
+            <strong>当前不是桌面应用环境</strong>
+            <span>浏览器预览无法打开系统文件选择框。请运行 npm run desktop:dev 或使用已安装的桌面应用进行导入。</span>
+          </div>
+        )}
         {isFixtureProvider(aiProvider) ? (
           <div className="importAiNotice warning">
             <strong>当前为测试模式</strong>
@@ -1642,19 +1845,47 @@ function ImportPanel({
             <span>P2 提炼将调用已配置的 OpenAI 兼容接口（如 DeepSeek）。</span>
           </div>
         )}
-        <div className="importMeta">
-          <span>当前来源：{sourceApp}</span>
-          <span>保存位置：{importPath}</span>
+        <div className="formGrid importSourceGrid">
+          <label>
+            <FieldLabel help="选择导出文件来自哪个 AI 平台" helpDetail="决定文件复制到 raw/imports 下的哪个子目录。">
+              来源平台
+            </FieldLabel>
+            <select value={resolvedImportSource} onChange={(event) => setSelectedSource(event.target.value)} disabled={busy || !resolvedImportSource}>
+              {availableConnectors.map((connector) => (
+                <option key={connector.source_app} value={connector.source_app}>{connector.display_name}</option>
+              ))}
+            </select>
+          </label>
         </div>
+        <div className="importMeta">
+          <span>当前来源：{resolvedImportSource || "未启用"}</span>
+          <span>保存位置：{selectedImportPath}</span>
+        </div>
+        {!resolvedImportSource && (
+          <p className="muted">请先在「来源」页启用至少一个可用平台，再选择文件导入。</p>
+        )}
+        {(busy || pipeline.phase === "failed") && (
+          <div className={`importPipelineProgress phase-${pipeline.phase}`}>
+            <strong>{pipeline.label}</strong>
+            {pipeline.phase === "failed" && pipeline.error && <p className="muted">{pipeline.error}</p>}
+            {pipeline.phase === "failed" && pipeline.can_retry && (
+              <button type="button" className="secondary" onClick={onRetryImport} disabled={busy}>
+                <RefreshCw size={16} />
+                <span>一键重试</span>
+              </button>
+            )}
+          </div>
+        )}
         <div className="buttonHintWrap">
           <div className="importCtaRow">
             <button
+              type="button"
               className="primary importCta"
-              onClick={onImport}
-              disabled={busy}
+              onClick={handleImportClick}
+              disabled={!canImport && isDesktopRuntime}
               title="选择文件后自动复制到导入目录、标准化记录、AI 提炼候选，并跳转到待确认"
             >
-              <FolderOpen size={17} />
+              <FolderOpen size={16} />
               <span>{busy ? "正在处理..." : "选择文件并自动处理"}</span>
             </button>
             <HelpTip title="一键完成导入全流程" detail="复制文件、标准化、AI 提炼候选。完成后请到「待确认」逐条审查。" />
@@ -1662,8 +1893,8 @@ function ImportPanel({
           <HintText>自动执行：复制到导入目录 → 标准化 → AI 提炼 → 进入「待确认」</HintText>
         </div>
         <div className="importFlowLinks">
-          <button type="button" onClick={onGoPending} disabled={busy} title="查看 AI 生成的候选知识并审查"><ListChecks size={15} />去待确认</button>
-          <button type="button" onClick={onGoLibrary} disabled={busy} title="搜索、导出已批准的知识"><BookOpenCheck size={15} />去知识库</button>
+          <button type="button" className="secondary" onClick={onGoPending} disabled={busy} title="查看 AI 生成的候选知识并审查"><ListChecks size={16} />去待确认</button>
+          <button type="button" className="secondary" onClick={onGoLibrary} disabled={busy} title="搜索、导出已批准的知识"><BookOpenCheck size={16} />去知识库</button>
         </div>
       </section>
       <section className="panel">
@@ -1672,7 +1903,7 @@ function ImportPanel({
           hint="文件已在导入目录但未处理时使用，不会重新选文件。"
           help="只运行 P1 标准化，不触发 AI 提炼。一般导入按钮已包含此步骤。"
         />
-        <button onClick={onRunNormalize} disabled={busy} title="对导入目录中已有文件重新运行标准化"><Play size={17} /><span>仅运行标准化</span></button>
+        <button className="secondary" onClick={onRunNormalize} disabled={busy} title="对导入目录中已有文件重新运行标准化"><Play size={16} /><span>仅运行标准化</span></button>
       </section>
     </div>
   );
@@ -1709,16 +1940,16 @@ function RunResultCard({
         <>
           <p className="muted">导入目录里没有需要处理的新文件。若你刚导入过，流程已在导入时自动跑完。</p>
           <div className="runResultLinks">
-            <button type="button" onClick={onGoLibrary}><BookOpenCheck size={15} />去知识库</button>
-            <button type="button" onClick={onGoLogs}><Archive size={15} />查看日志</button>
+            <button type="button" className="secondary" onClick={onGoLibrary}><BookOpenCheck size={16} />去知识库</button>
+            <button type="button" className="secondary" onClick={onGoLogs}><Archive size={16} />查看日志</button>
           </div>
         </>
       ) : (
         <>
           <p className="muted">没有新的待确认条目。可能内容已入库，或本次仅完成标准化未产生候选。</p>
           <div className="runResultLinks">
-            <button type="button" onClick={onGoLibrary}><BookOpenCheck size={15} />去知识库</button>
-            <button type="button" onClick={onGoLogs}><Archive size={15} />查看日志</button>
+            <button type="button" className="secondary" onClick={onGoLibrary}><BookOpenCheck size={16} />去知识库</button>
+            <button type="button" className="secondary" onClick={onGoLogs}><Archive size={16} />查看日志</button>
           </div>
         </>
       )}
@@ -1778,7 +2009,11 @@ function RunPanel({
           help="与「导入」页的手动选文件互补：导入按钮会立即处理所选文件；此页处理目录中所有待处理文件。"
         />
 
-        <h3 className="runSectionTitle">什么时候需要点这里？<HelpTip title="使用场景" detail="刚用导入按钮处理过则无需再来；适合丢文件进目录后统一处理或开启定时任务。" /></h3>
+        <h3 className="runSectionTitle">
+          <FieldLabel help="使用场景" helpDetail="刚用导入按钮处理过则无需再来；适合丢文件进目录后统一处理或开启定时任务。">
+            什么时候需要点这里？
+          </FieldLabel>
+        </h3>
         <ul className="runWhenList">
           <li>你已经把文件放进 raw/imports，但没有走「导入」页的按钮</li>
           <li>你想手动重跑全部待处理文件</li>
@@ -1793,7 +2028,7 @@ function RunPanel({
             disabled={busy}
             title="立即处理导入目录中所有新文件，生成候选后去「待确认」审查"
           >
-            <Play size={17} />
+            <Play size={16} />
             <span>{busy ? "正在处理..." : "立即运行"}</span>
           </button>
           <HintText>现在处理导入目录里所有新文件；完成后去「待确认」逐条审查</HintText>
@@ -1813,7 +2048,7 @@ function RunPanel({
           <p className="muted">用于补跑某一天的历史记录，一般不需要。</p>
           <div className="actions">
             <label className="fullField compactField">重跑日期<input type="date" value={rerunDate} onChange={(event) => setRerunDate(event.target.value)} /></label>
-            <button onClick={() => onRerunDate(rerunDate)} disabled={busy || !rerunDate}><CalendarClock size={16} />重跑日期</button>
+            <button className="secondary" onClick={() => onRerunDate(rerunDate)} disabled={busy || !rerunDate}><CalendarClock size={16} />重跑日期</button>
           </div>
         </details>
       </section>
@@ -1841,7 +2076,7 @@ function RunPanel({
             <span>{automation.pending_run.reason}</span>
             <div className="actions">
               <button className="primary" onClick={onConfirmAutomation} disabled={busy} title="确认后开始本次定时沉淀任务"><Check size={16} />确认运行</button>
-              <button onClick={onSkipAutomation} disabled={busy} title="跳过本次定时任务，等待下一次"><X size={16} />跳过本次</button>
+              <button className="secondary" onClick={onSkipAutomation} disabled={busy} title="跳过本次定时任务，等待下一次"><X size={16} />跳过本次</button>
             </div>
           </div>
         )}
@@ -1861,7 +2096,9 @@ function RunPanel({
           <label>重试次数<input type="number" min="0" value={settings.retry_count} onChange={(event) => updateSetting("retry_count", Number(event.target.value))} /></label>
           <label>重试间隔分钟<input type="number" min="0" value={settings.retry_delay_minutes} onChange={(event) => updateSetting("retry_delay_minutes", Number(event.target.value))} /></label>
         </div>
-        <button className="primary" onClick={() => onSaveAutomation(settings)} disabled={busy} title="保存定时任务的所有配置项"><Bell size={17} /><span>保存定时设置</span></button>
+        <div className="actions runActions">
+          <button className="primary" onClick={() => onSaveAutomation(settings)} disabled={busy} title="保存定时任务的所有配置项"><Bell size={16} /><span>保存定时设置</span></button>
+        </div>
       </section>
 
       <section className="panel">
@@ -1918,7 +2155,7 @@ function LibraryPanel({
   const [type, setType] = useState("");
   const [project, setProject] = useState("");
   const [tag, setTag] = useState("");
-  const [status, setStatus] = useState("");
+  const [status, setStatus] = useState("approved");
   const focusSet = useMemo(() => new Set(focusAtomIds), [focusAtomIds]);
   const recentSet = useMemo(() => new Set(recentlyApprovedIds), [recentlyApprovedIds]);
   const showRecentHighlight = focusAtomIds.length > 0 || recentlyApprovedIds.length > 0;
@@ -1953,7 +2190,7 @@ function LibraryPanel({
         {showRecentHighlight && (
           <div className="libraryRecentBar">
             <span>正在高亮刚批准的知识</span>
-            <button type="button" onClick={onClearFocus} title="取消高亮，显示全部知识">显示全部</button>
+            <button type="button" className="ghost" onClick={onClearFocus} title="取消高亮，显示全部知识">显示全部</button>
           </div>
         )}
         <div className="listHeader">
@@ -1961,20 +2198,38 @@ function LibraryPanel({
             <span>全部 {atoms.length}</span>
             {knowledge.facets.statuses.map((item) => <span key={item.value}>{item.value} {item.count}</span>)}
           </div>
-          <label className="search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索标题、正文、证据、标签" /></label>
         </div>
-        <div className="filterGrid">
-          <label><Filter size={15} />来源<select value={sourceApp} onChange={(event) => setSourceApp(event.target.value)}><option value="">全部</option>{knowledge.facets.source_apps.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select></label>
-          <label><Filter size={15} />类型<select value={type} onChange={(event) => setType(event.target.value)}><option value="">全部</option>{knowledge.facets.types.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select></label>
-          <label><Filter size={15} />项目<select value={project} onChange={(event) => setProject(event.target.value)}><option value="">全部</option>{knowledge.facets.projects.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select></label>
-          <label><Filter size={15} />标签<select value={tag} onChange={(event) => setTag(event.target.value)}><option value="">全部</option>{knowledge.facets.tags.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select></label>
-          <label><Filter size={15} />状态<select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">全部</option>{knowledge.facets.statuses.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select></label>
+        <div className="filterBar">
+          <label className="filterField filterField--wide filterField--search">
+            <span className="filterLabel">搜索</span>
+            <span className="search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索标题、正文、证据、标签" /></span>
+          </label>
+          <label className="filterField">
+            <span className="filterLabel"><Filter size={15} />来源</span>
+            <select value={sourceApp} onChange={(event) => setSourceApp(event.target.value)}><option value="">全部</option>{knowledge.facets.source_apps.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select>
+          </label>
+          <label className="filterField">
+            <span className="filterLabel"><Filter size={15} />类型</span>
+            <select value={type} onChange={(event) => setType(event.target.value)}><option value="">全部</option>{knowledge.facets.types.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select>
+          </label>
+          <label className="filterField">
+            <span className="filterLabel"><Filter size={15} />项目</span>
+            <select value={project} onChange={(event) => setProject(event.target.value)}><option value="">全部</option>{knowledge.facets.projects.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select>
+          </label>
+          <label className="filterField">
+            <span className="filterLabel"><Filter size={15} />标签</span>
+            <select value={tag} onChange={(event) => setTag(event.target.value)}><option value="">全部</option>{knowledge.facets.tags.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select>
+          </label>
+          <label className="filterField">
+            <span className="filterLabel"><Filter size={15} />状态</span>
+            <select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">全部</option>{knowledge.facets.statuses.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select>
+          </label>
         </div>
         <div className="libraryToolbar">
-          <button onClick={onExport} disabled={busy} title="将全部已批准知识导出为 Markdown 文件"><Download size={16} />导出 Markdown</button>
-          <button onClick={onObsidian} disabled={busy} title="生成 Obsidian 兼容的索引和文件结构"><BookOpenCheck size={16} />Obsidian 索引</button>
-          <button onClick={onBackup} disabled={busy} title="创建知识库完整备份到本地"><HardDriveDownload size={16} />备份</button>
-          <button onClick={onRestore} disabled={busy} title="从最近一次备份恢复知识库"><RefreshCw size={16} />恢复最近备份</button>
+          <button className="secondary" onClick={onExport} disabled={busy} title="将全部已批准知识导出为 Markdown 文件"><Download size={16} />导出 Markdown</button>
+          <button className="secondary" onClick={onObsidian} disabled={busy} title="生成 Obsidian 兼容的索引和文件结构"><BookOpenCheck size={16} />Obsidian 索引</button>
+          <button className="secondary" onClick={onBackup} disabled={busy} title="创建知识库完整备份到本地"><HardDriveDownload size={16} />备份</button>
+          <button className="secondary" onClick={onRestore} disabled={busy} title="从最近一次备份恢复知识库"><RefreshCw size={16} />恢复最近备份</button>
         </div>
       </section>
 
@@ -2018,9 +2273,9 @@ function LibraryPanel({
                 <span>{group.items.length} 条相似知识</span>
                 {group.items.map((item) => (
                   <div className="duplicateRow" key={item.atom.atom_id}>
-                    <button onClick={() => onSelect(item.atom.atom_id)}>{item.atom.title}</button>
+                    <button className="ghost" onClick={() => onSelect(item.atom.atom_id)}>{item.atom.title}</button>
                     {target && item.atom.atom_id !== target.atom.atom_id && (
-                      <button onClick={() => onMerge(item.atom.atom_id, target.atom.atom_id)} disabled={busy} title="将相似知识合并到首条，避免重复"><Split size={15} />合并到首条</button>
+                      <button className="secondary" onClick={() => onMerge(item.atom.atom_id, target.atom.atom_id)} disabled={busy} title="将相似知识合并到首条，避免重复"><Split size={16} />合并到首条</button>
                     )}
                   </div>
                 ))}
@@ -2098,14 +2353,14 @@ function PrivacyPanel({
         />
         <div className="formGrid">
           <label>来源授权<select value={settings.require_source_authorization ? "yes" : "no"} onChange={(event) => updateSetting("require_source_authorization", event.target.value === "yes")}><option value="yes">需要</option><option value="no">不需要</option></select></label>
-          <label>云端 AI 处理 private<select value={settings.allow_cloud_ai_for_private ? "yes" : "no"} onChange={(event) => updateSetting("allow_cloud_ai_for_private", event.target.value === "yes")}><option value="no">禁止</option><option value="yes">允许</option></select></label>
+          <label>云端 AI 处理 private<select value="no" disabled title="MVP 暂未开放 private 内容上云；private 记录仍默认阻断。"><option value="no">暂未开放</option></select></label>
           <label>原始记录保留<select value={settings.raw_retention_mode} onChange={(event) => updateSetting("raw_retention_mode", event.target.value as RawRetentionMode)}><option value="keep_forever">长期保留</option><option value="delete_after_days">按天数删除</option><option value="delete_after_successful_run">成功运行后删除</option></select></label>
           <label>保留天数<input type="number" min="0" value={settings.raw_retention_days} onChange={(event) => updateSetting("raw_retention_days", Number(event.target.value))} /></label>
         </div>
         <div className="privacyActions">
           <button className="primary" onClick={() => onSaveSettings(settings)} disabled={busy} title="保存隐私和安全相关配置"><Shield size={16} />保存设置</button>
-          <button onClick={onApplyRetention} disabled={busy} title="按当前保留策略清理过期原始文件"><Trash2 size={16} />执行保留策略</button>
-          <button onClick={onWriteLegalDrafts} disabled={busy} title="在本地生成隐私政策和用户协议草案"><FileText size={16} />生成协议草案</button>
+          <button className="secondary" onClick={onApplyRetention} disabled={busy} title="按当前保留策略清理过期原始文件"><Trash2 size={16} />执行保留策略</button>
+          <button className="secondary" onClick={onWriteLegalDrafts} disabled={busy} title="在本地生成隐私政策和用户协议草案"><FileText size={16} />生成协议草案</button>
         </div>
         <div className="secureState"><KeyRound size={16} /><span>API Key：{privacy.secure_credentials.openai_compatible_saved ? `已加密保存 ${privacy.secure_credentials.updated_at ?? ""}` : "未保存到本地"}</span></div>
       </section>
@@ -2113,7 +2368,9 @@ function PrivacyPanel({
       <section className="panel">
         <h2>敏感内容扫描</h2>
         <label className="fullField">待扫描文本<textarea value={scanText} onChange={(event) => setScanText(event.target.value)} /></label>
-        <button className="primary" onClick={() => void onScan(scanText).then(setScanResult)} disabled={busy}><Search size={16} />扫描</button>
+        <div className="privacyActions">
+          <button className="primary" onClick={() => void onScan(scanText).then(setScanResult)} disabled={busy}><Search size={16} />扫描</button>
+        </div>
         {scanResult && <div className="scanResult"><strong>{scanResult.sensitivity} · {scanResult.can_enter_personal_kb ? "可进入个人库" : "默认阻断"}</strong>{scanResult.findings.map((finding, index) => <span key={`${finding.rule_id}-${index}`}>{finding.label} · {finding.severity} · {finding.match_preview}</span>)}{scanResult.findings.length === 0 && <span>未发现敏感规则命中</span>}</div>}
       </section>
 
@@ -2126,9 +2383,9 @@ function PrivacyPanel({
         <h2>用户数据</h2>
         <div className="formGrid"><label>删除来源<select value={sourceToDelete} onChange={(event) => setSourceToDelete(event.target.value)}>{connectors.map((connector) => <option key={connector.source_app} value={connector.source_app}>{connector.display_name}</option>)}</select></label></div>
         <div className="privacyActions">
-          <button onClick={() => onDeleteSource(sourceToDelete)} disabled={busy}><Trash2 size={16} />删除来源数据</button>
-          <button onClick={onExportUserData} disabled={busy}><Download size={16} />导出用户数据</button>
-          <button onClick={onDeleteAllUserData} disabled={busy}><Trash2 size={16} />彻底删除本地数据</button>
+          <button className="danger" onClick={() => onDeleteSource(sourceToDelete)} disabled={busy}><Trash2 size={16} />删除来源数据</button>
+          <button className="secondary" onClick={onExportUserData} disabled={busy}><Download size={16} />导出用户数据</button>
+          <button className="danger" onClick={onDeleteAllUserData} disabled={busy}><Trash2 size={16} />彻底删除本地数据</button>
         </div>
       </section>
 
@@ -2220,7 +2477,7 @@ function CommercialPanel({
         </div>
         <label>账号邮箱<input value={accountEmail} onChange={(event) => setAccountEmail(event.target.value)} placeholder="you@example.com" /></label>
         <div className="commercialActions">
-          <button onClick={() => onSaveAccount(accountEmail)} disabled={busy || !accountEmail.trim()}><KeyRound size={16} />保存账号入口</button>
+          <button className="secondary" onClick={() => onSaveAccount(accountEmail)} disabled={busy || !accountEmail.trim()}><KeyRound size={16} />保存账号入口</button>
         </div>
       </section>
 
@@ -2265,8 +2522,10 @@ function PendingPanel({
   query,
   selectedId,
   importBatchAtomIds,
+  busy,
   onQuery,
   onSelect,
+  onInlineReview,
   onClearImportBatch,
   onGoLibrary
 }: {
@@ -2275,8 +2534,10 @@ function PendingPanel({
   query: string;
   selectedId: string;
   importBatchAtomIds: string[];
+  busy: boolean;
   onQuery: (value: string) => void;
   onSelect: (atomId: string) => void;
+  onInlineReview: (input: AtomUpdateInput) => void;
   onClearImportBatch: () => void;
   onGoLibrary: () => void;
 }) {
@@ -2382,25 +2643,92 @@ function PendingPanel({
             </button>
           </div>
         )}
-        <label className="search"><Search size={16} /><input value={query} onChange={(event) => onQuery(event.target.value)} placeholder="搜索标题、正文、证据" /></label>
+      </div>
+      <div className="filterBar">
+        <label className="filterField filterField--wide">
+          <span className="filterLabel">搜索</span>
+          <span className="search"><Search size={16} /><input value={query} onChange={(event) => onQuery(event.target.value)} placeholder="搜索标题、正文、证据" /></span>
+        </label>
       </div>
       <div className="atomList">
         {filteredAtoms.map((item) => (
-          <button
-            key={item.atom.atom_id}
-            className={[
-              selectedId === item.atom.atom_id ? "atomRow active" : "atomRow",
-              importBatchSet.has(item.atom.atom_id) ? "importBatch" : ""
-            ].filter(Boolean).join(" ")}
-            onClick={() => onSelect(item.atom.atom_id)}
-          >
-            <strong>{item.atom.title}</strong>
-            <span>
-              {importBatchSet.has(item.atom.atom_id) && <em className="importBatchTag">本次导入</em>}
-              {item.atom.type} · {item.atom.review_status} · {item.atom.source_app}
-            </span>
-            <small>{item.atom.evidence}</small>
-          </button>
+          statusFilter === "pending" ? (
+            <article
+              key={item.atom.atom_id}
+              className={[
+                "atomRow",
+                "atomRowInline",
+                selectedId === item.atom.atom_id ? "active" : "",
+                importBatchSet.has(item.atom.atom_id) ? "importBatch" : ""
+              ].filter(Boolean).join(" ")}
+            >
+              <div className="atomRowMain">
+                <strong>{item.atom.title}</strong>
+                <span>
+                  {importBatchSet.has(item.atom.atom_id) && <em className="importBatchTag">本次导入</em>}
+                  {item.atom.type} · {item.atom.source_app}
+                </span>
+                <p className="atomPreview">{item.atom.content}</p>
+                <small>{item.atom.evidence}</small>
+              </div>
+              <div className="atomInlineActions">
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={busy}
+                  onClick={() => onInlineReview({
+                    atom_id: item.atom.atom_id,
+                    title: item.atom.title,
+                    type: item.atom.type,
+                    content: item.atom.content,
+                    tags: item.atom.tags,
+                    review_status: "approved"
+                  })}
+                  title="批准后将进入正式知识库"
+                >
+                  <Check size={16} />
+                  <span>批准</span>
+                </button>
+                <button
+                  type="button"
+                  className="danger"
+                  disabled={busy}
+                  onClick={() => onInlineReview({
+                    atom_id: item.atom.atom_id,
+                    title: item.atom.title,
+                    type: item.atom.type,
+                    content: item.atom.content,
+                    tags: item.atom.tags,
+                    review_status: "rejected"
+                  })}
+                  title="拒绝后不会进入知识库"
+                >
+                  <X size={16} />
+                  <span>拒绝</span>
+                </button>
+                <button type="button" className="secondary" disabled={busy} onClick={() => onSelect(item.atom.atom_id)} title="打开详情页编辑后审查">
+                  <SquarePen size={16} />
+                  <span>详情</span>
+                </button>
+              </div>
+            </article>
+          ) : (
+            <button
+              key={item.atom.atom_id}
+              className={[
+                selectedId === item.atom.atom_id ? "atomRow active" : "atomRow",
+                importBatchSet.has(item.atom.atom_id) ? "importBatch" : ""
+              ].filter(Boolean).join(" ")}
+              onClick={() => onSelect(item.atom.atom_id)}
+            >
+              <strong>{item.atom.title}</strong>
+              <span>
+                {importBatchSet.has(item.atom.atom_id) && <em className="importBatchTag">本次导入</em>}
+                {item.atom.type} · {item.atom.review_status} · {item.atom.source_app}
+              </span>
+              <small>{item.atom.evidence}</small>
+            </button>
+          )
         ))}
         {filteredAtoms.length === 0 && (
           <div className="emptyState">
@@ -2466,10 +2794,10 @@ function DetailPanel({
       <label className="fullField">内容<textarea value={content} onChange={(event) => setContent(event.target.value)} /></label>
       <div className="evidence"><strong>证据</strong><p>{document.atom.evidence}</p><small>{document.atom.source_raw_paths.join(", ")}</small></div>
       <div className="actions">
-        <button onClick={() => onUpdate(baseInput)} disabled={busy} title="保存标题、类型、标签和正文的修改"><SquarePen size={16} />保存</button>
-        <button onClick={() => onReview({ ...baseInput, review_status: "approved" })} disabled={busy} title="批准后将进入正式知识库，可在知识库搜索和使用"><Check size={16} />批准</button>
-        <button onClick={() => onReview({ ...baseInput, review_status: "rejected" })} disabled={busy} title="拒绝后不会进入知识库，可从列表中移除"><X size={16} />拒绝</button>
-        <button onClick={() => onReview({ ...baseInput, review_status: "merged", merged_into: mergedInto })} disabled={busy || !mergedInto} title="将本条知识合并到已选目标，避免重复"><Split size={16} />合并</button>
+        <button className="secondary" onClick={() => onUpdate(baseInput)} disabled={busy} title="保存标题、类型、标签和正文的修改"><SquarePen size={16} />保存</button>
+        <button className="primary" onClick={() => onReview({ ...baseInput, review_status: "approved" })} disabled={busy} title="批准后将进入正式知识库，可在知识库搜索和使用"><Check size={16} />批准</button>
+        <button className="danger" onClick={() => onReview({ ...baseInput, review_status: "rejected" })} disabled={busy} title="拒绝后不会进入知识库，可从列表中移除"><X size={16} />拒绝</button>
+        <button className="secondary" onClick={() => onReview({ ...baseInput, review_status: "merged", merged_into: mergedInto })} disabled={busy || !mergedInto} title="将本条知识合并到已选目标，避免重复"><Split size={16} />合并</button>
       </div>
     </section>
   );
@@ -2487,57 +2815,134 @@ function SettingsPanel({
   onCheckUpdates: () => void;
 }) {
   const [sourceApp, setSourceApp] = useState(state.sourceApp);
+  const [presetId, setPresetId] = useState<AiProviderPresetId>(() =>
+    resolvePresetId(state.aiProvider, state.aiBaseUrl, state.aiProviderPreset)
+  );
   const [aiProvider, setAiProvider] = useState(state.aiProvider);
   const [baseUrl, setBaseUrl] = useState(state.aiBaseUrl ?? "");
   const [model, setModel] = useState(state.aiModel ?? "");
   const [apiKey, setApiKey] = useState("");
+  const selectedPreset = findPresetById(presetId);
+  const showCustomBaseUrl = presetId === "custom";
+  const showRealAiFields = !isFixtureProvider(aiProvider);
+
+  useEffect(() => {
+    setSourceApp(state.sourceApp);
+    setPresetId(resolvePresetId(state.aiProvider, state.aiBaseUrl, state.aiProviderPreset));
+    setAiProvider(state.aiProvider);
+    setBaseUrl(state.aiBaseUrl ?? "");
+    setModel(state.aiModel ?? "");
+  }, [state.sourceApp, state.aiProvider, state.aiProviderPreset, state.aiBaseUrl, state.aiModel]);
+
+  function handlePresetChange(nextPresetId: AiProviderPresetId) {
+    const preset = findPresetById(nextPresetId);
+    if (!preset) {
+      return;
+    }
+    setPresetId(nextPresetId);
+    setAiProvider(preset.aiProvider);
+    if (preset.aiProvider === "fixture") {
+      return;
+    }
+    if (nextPresetId === "custom") {
+      return;
+    }
+    if (preset.baseUrl) {
+      setBaseUrl(preset.baseUrl);
+    }
+    if (preset.defaultModel) {
+      setModel(preset.defaultModel);
+    }
+  }
 
   return (
     <div className="grid two">
       <section className="panel settingsPanel">
         <FirstTimeBanner section="settings">
           <strong>配置 AI 服务与默认来源</strong>
-          测试模式不调用外部 API；切换为真实 AI API 后需填写 Base URL、模型和 API Key。
+          测试模式不调用外部 API；选择常见服务商后会自动填入官方接口地址，仅需填写 API Key。
         </FirstTimeBanner>
         <SectionHeading
           title="设置"
-          hint="默认来源决定导入文件保存位置；AI 服务决定提炼是否调用真实接口。"
+          hint="默认来源决定导入文件保存位置；AI 服务商决定提炼是否调用真实接口。"
           help="API Key 加密保存在本地，不会上传到云端。"
         />
         {isFixtureProvider(aiProvider) && (
           <div className="importAiNotice warning">
             <strong>当前为本地测试模式（fixture）</strong>
-            <span>不消耗 API 额度，提炼结果为本地模板。切换下方「AI 服务」并填写 DeepSeek 配置后可启用真实调用。</span>
+            <span>不消耗 API 额度，提炼结果为本地模板。切换下方「AI 服务商」为 DeepSeek 等常见服务并填写 API Key 后可启用真实调用。</span>
           </div>
         )}
         <div className="formGrid">
           <label>
-            默认来源
-            <HelpTip title="导入文件的默认平台" detail="决定 raw/imports 下的子目录和默认连接器。" />
+            <FieldLabel help="导入文件的默认平台" helpDetail="决定 raw/imports 下的子目录和默认连接器。">
+              默认来源
+            </FieldLabel>
             <select value={sourceApp} onChange={(event) => setSourceApp(event.target.value)}>{state.connectors.filter((connector) => connector.status === "available" && connector.enabled).map((connector) => <option key={connector.source_app} value={connector.source_app}>{connector.display_name}</option>)}</select>
           </label>
           <label>
-            AI 服务
-            <HelpTip title="fixture 与真实 API 的区别" detail="fixture：本地模板，不联网、不消耗额度。真实 API：调用 OpenAI 兼容接口（如 DeepSeek）进行提炼。" />
-            <select value={aiProvider} onChange={(event) => setAiProvider(event.target.value)}><option value="fixture">本地测试模式（不调用 API）</option><option value="openai-compatible">真实 AI API（OpenAI 兼容，如 DeepSeek）</option></select>
+            <FieldLabel
+              help="官方接口与中转的区别"
+              helpDetail="常见服务商已预填官方 OpenAI 兼容地址，无需手输 URL。若使用第三方中转或自建网关，请选择「自定义（手动填写）」并填写 Base URL。"
+            >
+              AI 服务商
+            </FieldLabel>
+            <select value={presetId} onChange={(event) => handlePresetChange(event.target.value as AiProviderPresetId)}>
+              {AI_PROVIDER_PRESETS.map((preset) => (
+                <option key={preset.id} value={preset.id}>{preset.label}</option>
+              ))}
+            </select>
           </label>
-          <label>
-            Base URL
-            <HelpTip title="API 服务地址" detail="DeepSeek 示例：https://api.deepseek.com/v1" />
-            <input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://api.deepseek.com/v1" />
-          </label>
-          <label>
-            模型
-            <HelpTip title="调用的模型名称" detail="DeepSeek 示例：deepseek-chat" />
-            <input value={model} onChange={(event) => setModel(event.target.value)} placeholder="deepseek-chat" />
-          </label>
-          <label>
-            API Key
-            <HelpTip title="访问密钥" detail="本地加密保存；留空则保持已保存的密钥不变。" />
-            <input value={apiKey} onChange={(event) => setApiKey(event.target.value)} type="password" placeholder={state.apiKeyConfigured ? "已保存，留空则不修改" : "本地加密保存"} />
-          </label>
+          {showCustomBaseUrl && showRealAiFields && (
+            <label>
+              <FieldLabel help="自定义 API 地址" helpDetail="填写 OpenAI 兼容接口的完整 Base URL，例如第三方中转或自建网关地址。">
+                Base URL
+              </FieldLabel>
+              <input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://your-relay.example.com/v1" />
+            </label>
+          )}
+          {showRealAiFields && (
+            <label>
+              <FieldLabel
+                help="调用的模型名称"
+                helpDetail={selectedPreset?.defaultModel ? `默认推荐：${selectedPreset.defaultModel}，可按账号权限修改为其他模型。` : "填写服务商支持的模型 ID。"}
+              >
+                模型
+              </FieldLabel>
+              <input
+                value={model}
+                onChange={(event) => setModel(event.target.value)}
+                placeholder={selectedPreset?.defaultModel ?? "deepseek-chat"}
+              />
+            </label>
+          )}
+          {showRealAiFields && (
+            <label>
+              <FieldLabel help="访问密钥" helpDetail="本地加密保存；留空则保持已保存的密钥不变。">
+                API Key
+              </FieldLabel>
+              <input value={apiKey} onChange={(event) => setApiKey(event.target.value)} type="password" placeholder={state.apiKeyConfigured ? "已保存，留空则不修改" : "本地加密保存"} />
+            </label>
+          )}
         </div>
-        <button className="primary" onClick={() => onSave({ sourceApp, aiProvider, baseUrl, model, apiKey })} disabled={busy} title="保存来源、AI 服务和 API 配置"><Shield size={17} /><span>保存会话配置</span></button>
+        <div className="actions runActions">
+        <button
+          className="primary"
+          onClick={() => onSave({
+            sourceApp,
+            aiProvider,
+            aiProviderPreset: presetId,
+            baseUrl: showRealAiFields ? baseUrl : "",
+            model: showRealAiFields ? model : "",
+            apiKey
+          })}
+          disabled={busy}
+          title="保存来源、AI 服务和 API 配置"
+        >
+          <Shield size={16} />
+          <span>保存会话配置</span>
+        </button>
+        </div>
       </section>
 
       <section className="panel releasePanel">
@@ -2553,7 +2958,9 @@ function SettingsPanel({
           <span>更新地址</span><strong>{state.release.update_url}</strong>
           <span>卸载策略</span><strong>{state.release.uninstall_policy === "retain_user_data" ? "保留用户数据" : state.release.uninstall_policy}</strong>
         </div>
-        <button className="secondary" onClick={onCheckUpdates} disabled={busy || !state.release.update_enabled}><PackageCheck size={17} /><span>检查更新</span></button>
+        <div className="actions runActions">
+        <button className="secondary" onClick={onCheckUpdates} disabled={busy || !state.release.update_enabled}><PackageCheck size={16} /><span>检查更新</span></button>
+        </div>
       </section>
     </div>
   );
@@ -2601,7 +3008,7 @@ function reviewStatusLabel(status?: ReviewStatus): string {
 }
 
 function titleFor(active: NavKey): string {
-  return navItems.find((item) => item.key === active)?.label ?? "工作台";
+  return allNavItems.find((item) => item.key === active)?.label ?? (active === "detail" ? "详情" : "工作台");
 }
 
 function subtitleFor(active: NavKey): string {

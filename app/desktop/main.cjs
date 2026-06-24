@@ -1,14 +1,21 @@
 const { app, BrowserWindow, dialog, ipcMain, Notification, powerMonitor } = require("electron");
-const { autoUpdater } = require("electron-updater");
 const { spawn } = require("node:child_process");
 const { copyFile, mkdir, readdir, readFile, writeFile } = require("node:fs/promises");
 const path = require("node:path");
+const {
+  assertImportSourceEnabled,
+  buildImportDialogOptions,
+  ensureEnabledConnectorsDefaults,
+  resolveImportTargetSource
+} = require("./desktop-import.cjs");
 
 const devRoot = path.resolve(__dirname, "../..");
 const runtimeRoot = app.isPackaged ? path.join(process.resourcesPath, "app.asar.unpacked") : devRoot;
 const assetRoot = app.isPackaged ? app.getAppPath() : devRoot;
 const sourceApps = ["codex", "cursor", "deepseek", "doubao", "workbuddy"];
 const AUTOMATION_CHECK_MS = 30_000;
+const SESSION_CONFIG_PATH = "data/runtime/desktop-session.json";
+const APP_SETTINGS_FILE = "desktop-app-settings.json";
 const releaseInfo = {
   app_name: "AI Chat Knowledge",
   app_id: "com.villweb.aichatknowledge",
@@ -24,6 +31,9 @@ const state = {
   vaultRoot: "",
   sourceApp: "codex",
   aiProvider: "fixture",
+  aiProviderPreset: "fixture",
+  aiBaseUrl: "",
+  aiModel: "",
   apiKeyConfigured: false,
   enabledConnectors: {
     codex: true,
@@ -38,8 +48,16 @@ let automationTimer = null;
 let automationRunning = false;
 let pendingAutomationRun = null;
 let lastAutomationDecision = null;
-// 桌面端流水线状态，供界面展示当前处理阶段
+let sessionConfigLoaded = false;
+// 桌面端流水线状态，供界面展示当前处理阶段与子步骤
 let pipelinePhase = "idle";
+let pipelineSubstep = null;
+let pipelineError = null;
+let lastPipelineRetry = null;
+
+function getAutoUpdater() {
+  return require("electron-updater").autoUpdater;
+}
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -64,8 +82,9 @@ function createWindow() {
   }
 }
 
-app.whenReady().then(() => {
-  state.vaultRoot = buildDefaultVaultRoot();
+app.whenReady().then(async () => {
+  state.vaultRoot = await resolveInitialVaultRoot();
+  applyEnabledConnectorDefaults();
   configureAutoUpdater();
   registerIpc();
   createWindow();
@@ -86,6 +105,7 @@ app.on("activate", () => {
 
 function registerIpc() {
   ipcMain.handle("app:get-state", async () => {
+    await ensureSessionConfigLoaded();
     const privacy = await getPrivacyState();
     return {
       ...state,
@@ -102,10 +122,13 @@ function registerIpc() {
     };
   });
 
-  ipcMain.handle("vault:choose", async () => {
-    const result = await dialog.showOpenDialog({ properties: ["openDirectory"] });
+  ipcMain.handle("vault:choose", async (event) => {
+    const parentWindow = BrowserWindow.fromWebContents(event.sender);
+    const result = await dialog.showOpenDialog(parentWindow ?? undefined, { properties: ["openDirectory"] });
     if (!result.canceled && result.filePaths[0]) {
       state.vaultRoot = result.filePaths[0];
+      resetVaultSessionState();
+      await saveAppSettings();
       pushEvent("vault_selected", `知识库位置已切换：${path.basename(state.vaultRoot)}`);
     }
     return { vaultRoot: state.vaultRoot };
@@ -119,6 +142,17 @@ function registerIpc() {
       state.sourceApp = input.sourceApp;
     }
     state.aiProvider = input.aiProvider === "openai-compatible" ? "openai-compatible" : "fixture";
+    if (input.aiProviderPreset) {
+      state.aiProviderPreset = input.aiProviderPreset;
+    } else if (state.aiProvider === "fixture") {
+      state.aiProviderPreset = "fixture";
+    }
+    if (input.baseUrl !== undefined) {
+      state.aiBaseUrl = input.baseUrl;
+    }
+    if (input.model !== undefined) {
+      state.aiModel = input.model;
+    }
     if (input.apiKey) {
       state.apiKeyConfigured = true;
     }
@@ -127,19 +161,27 @@ function registerIpc() {
       const credentialResult = await runScript("scripts/privacy-security.ts", ["save-credential", "--vault-root", state.vaultRoot], JSON.stringify({
         service: "openai-compatible",
         api_key: input.apiKey,
-        base_url: input.baseUrl ?? "",
-        model: input.model ?? ""
+        base_url: input.baseUrl ?? state.aiBaseUrl ?? "",
+        model: input.model ?? state.aiModel ?? ""
       }));
       if (!credentialResult.ok) {
         throw new Error(credentialResult.stderr || "API Key 加密保存失败。");
       }
+    } else if (state.aiProvider === "openai-compatible" && state.apiKeyConfigured && (input.baseUrl || input.model)) {
+      await updateStoredCredentialMetadata(input.baseUrl ?? state.aiBaseUrl ?? "", input.model ?? state.aiModel ?? "");
     }
-    if (input.baseUrl) {
-      process.env.AI_KB_OPENAI_BASE_URL = input.baseUrl;
+    if (state.aiProvider === "openai-compatible") {
+      if (state.aiBaseUrl) {
+        process.env.AI_KB_OPENAI_BASE_URL = state.aiBaseUrl;
+      }
+      if (state.aiModel) {
+        process.env.AI_KB_OPENAI_MODEL = state.aiModel;
+      }
+    } else {
+      delete process.env.AI_KB_OPENAI_BASE_URL;
+      delete process.env.AI_KB_OPENAI_MODEL;
     }
-    if (input.model) {
-      process.env.AI_KB_OPENAI_MODEL = input.model;
-    }
+    await saveSessionConfig();
     pushEvent("settings_saved", input.apiKey ? "AI 服务配置已保存，API Key 已本地加密保存。" : "AI 服务配置已保存。");
     return { ok: true, aiProvider: state.aiProvider, apiKeyConfigured: state.apiKeyConfigured };
   });
@@ -163,20 +205,29 @@ function registerIpc() {
       const nextSource = connectors.find((item) => item.status === "available" && state.enabledConnectors[item.source_app]);
       state.sourceApp = nextSource?.source_app ?? "codex";
     }
+    await saveSessionConfig();
     pushEvent("connector_updated", `${connector.display_name} 已${state.enabledConnectors[input.sourceApp] ? "启用" : "停用"}。`);
     return { connectors: await listConnectors(), sourceApp: state.sourceApp };
   });
 
-  ipcMain.handle("import:choose-files", async (_event, sourceApp) => {
-    const targetSource = sourceApp || state.sourceApp;
-    ensureSourceEnabled(targetSource);
-    const result = await dialog.showOpenDialog({
-      properties: ["openFile", "multiSelections"],
-      filters: [{ name: "AI chat exports", extensions: ["md", "markdown", "txt", "json"] }]
-    });
-    if (result.canceled) {
-      return { copied_file_count: 0, auto_processed: false };
+  ipcMain.handle("import:choose-files", async (event, sourceApp) => {
+    applyEnabledConnectorDefaults();
+    const parentWindow = BrowserWindow.fromWebContents(event.sender);
+    if (parentWindow && !parentWindow.isDestroyed()) {
+      parentWindow.focus();
     }
+
+    // 先打开文件选择框，避免来源校验失败时用户完全无法选文件
+    const result = await dialog.showOpenDialog(parentWindow ?? undefined, buildImportDialogOptions());
+    if (result.canceled) {
+      return { copied_file_count: 0, auto_processed: false, canceled: true };
+    }
+
+    const targetSource = resolveImportTargetSource(sourceApp, state.sourceApp);
+    if (!targetSource) {
+      throw new Error("没有可用的导入来源，请先在「来源」页启用至少一个连接器。");
+    }
+    assertImportSourceEnabled(targetSource, state.enabledConnectors);
 
     const importPath = `raw/imports/${targetSource}`;
     const targetDir = path.join(state.vaultRoot, importPath);
@@ -191,14 +242,27 @@ function registerIpc() {
     }
 
     pipelinePhase = "importing";
+    pipelineSubstep = "copying";
+    pipelineError = null;
     pushEvent("manual_import_files", `已导入 ${result.filePaths.length} 个文件到 ${importPath}，正在自动标准化和提炼...`);
 
     try {
       pipelinePhase = "processing";
+      pipelineSubstep = "normalizing";
+      lastPipelineRetry = {
+        kind: "manual_import",
+        source_app: targetSource,
+        copied_raw_paths: copiedRawPaths,
+        copied_file_names: copiedNames,
+        copied_file_count: result.filePaths.length,
+        import_path: importPath
+      };
       const pipelineResult = await runDailyWorkflow(undefined, undefined, {
         uiManualImport: true,
-        copiedRawPaths
+        copiedRawPaths,
+        sourceApp: targetSource
       });
+      pipelineSubstep = null;
       const atoms = await listAtoms();
       const pendingCount = atoms.filter((item) => item.atom.review_status === "pending").length;
       const importSummary = parseScriptStdout(pipelineResult.importResult);
@@ -235,7 +299,70 @@ function registerIpc() {
         ...pipelineResult
       };
     } catch (error) {
-      pipelinePhase = "idle";
+      pipelinePhase = "failed";
+      pipelineSubstep = null;
+      pipelineError = toErrorMessage(error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle("import:retry", async () => {
+    if (!lastPipelineRetry) {
+      throw new Error("没有可重试的导入任务。");
+    }
+
+    const ctx = lastPipelineRetry;
+    pipelineError = null;
+    pipelinePhase = "processing";
+    pipelineSubstep = "normalizing";
+
+    try {
+      if (ctx.kind === "manual_import") {
+        const pipelineResult = await runDailyWorkflow(undefined, undefined, {
+          uiManualImport: true,
+          copiedRawPaths: ctx.copied_raw_paths,
+          sourceApp: ctx.source_app
+        });
+        pipelineSubstep = null;
+        const atoms = await listAtoms();
+        const pendingCount = atoms.filter((item) => item.atom.review_status === "pending").length;
+        const importSummary = parseScriptStdout(pipelineResult.importResult);
+        const extractSummary = parseScriptStdout(pipelineResult.extractResult);
+        const importBatchAtomIds = Array.from(new Set([
+          ...(importSummary?.generated_atom_ids ?? []),
+          ...(extractSummary?.generated_atom_ids ?? [])
+        ]));
+        pipelinePhase = pendingCount > 0 ? "waiting_review" : "done";
+        pushEvent("import_pipeline_retried", `重试完成：${pendingCount} 条知识待确认。`);
+        return {
+          copied_file_count: ctx.copied_file_count,
+          copied_file_names: ctx.copied_file_names,
+          copied_raw_paths: ctx.copied_raw_paths,
+          source_app: ctx.source_app,
+          import_path: ctx.import_path,
+          auto_processed: true,
+          pending_atom_count: pendingCount,
+          total_atom_count: atoms.length,
+          normalized_record_count: importSummary?.normalized_record_count ?? 0,
+          generated_atom_count: Math.max(
+            importSummary?.generated_atom_count ?? 0,
+            extractSummary?.generated_atom_count ?? 0
+          ),
+          failed_file_count: importSummary?.failed_file_count ?? 0,
+          blocked_record_count: extractSummary?.blocked_record_count ?? 0,
+          import_batch_atom_ids: importBatchAtomIds,
+          import_batch_record_ids: importSummary?.normalized_record_ids ?? [],
+          used_personal_default: true,
+          pipeline: getPipelineState(),
+          ...pipelineResult
+        };
+      }
+
+      throw new Error("不支持的重试类型。");
+    } catch (error) {
+      pipelinePhase = "failed";
+      pipelineSubstep = null;
+      pipelineError = toErrorMessage(error);
       throw error;
     }
   });
@@ -260,7 +387,9 @@ function registerIpc() {
       pushEvent("p1_import", `导入和标准化完成，${pendingCount} 条知识待确认。`);
       return { ...result, pending_atom_count: pendingCount, pipeline: getPipelineState() };
     } catch (error) {
-      pipelinePhase = "idle";
+      pipelinePhase = "failed";
+      pipelineSubstep = null;
+      pipelineError = toErrorMessage(error);
       throw error;
     }
   });
@@ -274,7 +403,9 @@ function registerIpc() {
       pushEvent("daily_run", `每日沉淀完成，${result.pending_atom_count} 条知识待确认。`);
       return result;
     } catch (error) {
-      pipelinePhase = "idle";
+      pipelinePhase = "failed";
+      pipelineSubstep = null;
+      pipelineError = toErrorMessage(error);
       throw error;
     }
   });
@@ -471,6 +602,37 @@ function buildDefaultVaultRoot() {
   return process.env.AI_KB_VAULT_ROOT || path.join(app.getPath("userData"), releaseInfo.default_vault_dir_name);
 }
 
+async function resolveInitialVaultRoot() {
+  if (process.env.AI_KB_VAULT_ROOT) {
+    return process.env.AI_KB_VAULT_ROOT;
+  }
+
+  try {
+    const settings = JSON.parse(await readFile(getAppSettingsPath(), "utf8"));
+    if (typeof settings.last_vault_root === "string" && settings.last_vault_root.trim()) {
+      return settings.last_vault_root;
+    }
+  } catch {
+    // 首次启动没有应用级设置时使用默认 vault
+  }
+
+  return buildDefaultVaultRoot();
+}
+
+async function saveAppSettings() {
+  const settingsPath = getAppSettingsPath();
+  await mkdir(path.dirname(settingsPath), { recursive: true });
+  await writeFile(settingsPath, `${JSON.stringify({
+    schema_version: "desktop_app_settings.v1",
+    last_vault_root: state.vaultRoot,
+    updated_at: new Date().toISOString()
+  }, null, 2)}\n`, "utf8");
+}
+
+function getAppSettingsPath() {
+  return path.join(app.getPath("userData"), APP_SETTINGS_FILE);
+}
+
 function getReleaseState() {
   return {
     ...releaseInfo,
@@ -483,6 +645,7 @@ function getReleaseState() {
 }
 
 function configureAutoUpdater() {
+  const autoUpdater = getAutoUpdater();
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
   const updateUrl = process.env[releaseInfo.update_url_env];
@@ -493,6 +656,7 @@ async function checkForUpdates() {
   if (!app.isPackaged && !process.env[releaseInfo.update_url_env]) {
     return { enabled: false, message: "未配置更新发布地址。" };
   }
+  const autoUpdater = getAutoUpdater();
   const result = await autoUpdater.checkForUpdates();
   return { enabled: true, update_info: result?.updateInfo ?? null };
 }
@@ -549,7 +713,14 @@ async function getPrivacyState() {
   if (!result.ok) {
     throw new Error(result.stderr || "读取隐私安全状态失败。");
   }
-  return JSON.parse(result.stdout);
+  const privacy = JSON.parse(result.stdout);
+  return {
+    ...privacy,
+    sources: privacy.sources.map((source) => ({
+      ...source,
+      authorized: Boolean(state.enabledConnectors[source.source_app])
+    }))
+  };
 }
 
 async function getCommercialState() {
@@ -664,15 +835,17 @@ async function runAutomationDate(runDate, reason) {
 }
 
 async function runDailyWorkflow(runDate, runIdPrefix, options = {}) {
-  ensureSourceEnabled(state.sourceApp);
+  const activeSourceApp = options.sourceApp ?? state.sourceApp;
+  ensureSourceEnabled(activeSourceApp);
   const importArgs = [
     "--source-app",
-    state.sourceApp,
+    activeSourceApp,
     "--vault-root",
     state.vaultRoot
   ];
   if (options.uiManualImport) {
     importArgs.push("--default-sensitivity-missing", "personal");
+    importArgs.push("--skip-pending-atoms");
     if (options.copiedRawPaths?.length) {
       for (const rawPath of options.copiedRawPaths) {
         importArgs.push("--only-raw-path", rawPath);
@@ -681,7 +854,7 @@ async function runDailyWorkflow(runDate, runIdPrefix, options = {}) {
   }
   const extractArgs = [
     "--source-app",
-    state.sourceApp,
+    activeSourceApp,
     "--provider",
     state.aiProvider,
     "--allow-ai",
@@ -693,6 +866,7 @@ async function runDailyWorkflow(runDate, runIdPrefix, options = {}) {
     extractArgs.push("--run-date", runDate, "--run-id", `${runIdPrefix}_extract`);
   }
 
+  pipelineSubstep = "normalizing";
   const importResult = await runScript("scripts/run-manual-import-normalization.ts", importArgs);
   if (!importResult.ok) {
     pushEvent("daily_run", importResult.stderr);
@@ -710,6 +884,7 @@ async function runDailyWorkflow(runDate, runIdPrefix, options = {}) {
     await loadSecureCredentialIntoEnv();
   }
 
+  pipelineSubstep = "extracting";
   const extractResult = await runScript("scripts/extract-knowledge-atoms.ts", extractArgs);
   if (!extractResult.ok) {
     pushEvent("daily_run", extractResult.stderr);
@@ -798,14 +973,19 @@ function showNotification(title, body) {
   new Notification({ title, body }).show();
 }
 
+function applyEnabledConnectorDefaults() {
+  const next = ensureEnabledConnectorsDefaults(state.enabledConnectors, sourceApps, state.sourceApp);
+  state.enabledConnectors = next.enabledConnectors;
+  state.sourceApp = next.sourceApp;
+}
+
 function isSourceEnabled(sourceApp) {
   return Boolean(state.enabledConnectors[sourceApp]);
 }
 
 function ensureSourceEnabled(sourceApp) {
-  if (!isSourceEnabled(sourceApp)) {
-    throw new Error(`连接器未启用，无法读取来源：${sourceApp}`);
-  }
+  applyEnabledConnectorDefaults();
+  assertImportSourceEnabled(sourceApp, state.enabledConnectors);
 }
 
 async function listLogs() {
@@ -833,6 +1013,7 @@ async function ensureSessionConfigLoaded() {
   }
 
   sessionConfigLoaded = true;
+  applyEnabledConnectorDefaults();
   const configPath = path.join(state.vaultRoot, SESSION_CONFIG_PATH);
   let savedConfig = null;
   try {
@@ -844,6 +1025,15 @@ async function ensureSessionConfigLoaded() {
   const privacy = await getPrivacyState();
   const credentialSaved = privacy.secure_credentials.openai_compatible_saved;
 
+  if (savedConfig?.enabled_connectors && typeof savedConfig.enabled_connectors === "object") {
+    for (const sourceApp of sourceApps) {
+      if (typeof savedConfig.enabled_connectors[sourceApp] === "boolean") {
+        state.enabledConnectors[sourceApp] = savedConfig.enabled_connectors[sourceApp];
+      }
+    }
+    applyEnabledConnectorDefaults();
+  }
+
   if (savedConfig?.source_app && isSourceEnabled(savedConfig.source_app)) {
     state.sourceApp = savedConfig.source_app;
   }
@@ -853,6 +1043,12 @@ async function ensureSessionConfigLoaded() {
   } else if (credentialSaved) {
     // 已保存 API Key 时默认启用真实 AI，避免重启后仍停留在测试模式
     state.aiProvider = "openai-compatible";
+  }
+
+  if (savedConfig?.ai_provider_preset) {
+    state.aiProviderPreset = savedConfig.ai_provider_preset;
+  } else if (state.aiProvider === "fixture") {
+    state.aiProviderPreset = "fixture";
   }
 
   if (savedConfig?.base_url) {
@@ -880,27 +1076,88 @@ async function saveSessionConfig() {
     schema_version: "desktop_session.v1",
     source_app: state.sourceApp,
     ai_provider: state.aiProvider,
+    ai_provider_preset: state.aiProviderPreset,
     base_url: state.aiBaseUrl,
     model: state.aiModel,
+    enabled_connectors: state.enabledConnectors,
     updated_at: new Date().toISOString()
   }, null, 2)}\n`, "utf8");
+}
+
+function resetVaultSessionState() {
+  state.sourceApp = "codex";
+  state.aiProvider = "fixture";
+  state.aiProviderPreset = "fixture";
+  state.aiBaseUrl = "";
+  state.aiModel = "";
+  state.apiKeyConfigured = false;
+  state.enabledConnectors = {
+    codex: true,
+    cursor: true,
+    deepseek: true,
+    doubao: false,
+    workbuddy: false
+  };
+  sessionConfigLoaded = false;
+  pipelinePhase = "idle";
+  pipelineSubstep = null;
+  pipelineError = null;
+  lastPipelineRetry = null;
+  delete process.env.AI_KB_OPENAI_API_KEY;
+  delete process.env.AI_KB_OPENAI_BASE_URL;
+  delete process.env.AI_KB_OPENAI_MODEL;
+}
+
+async function updateStoredCredentialMetadata(baseUrl, model) {
+  const result = await runScript("scripts/privacy-security.ts", ["load-credential", "--vault-root", state.vaultRoot]);
+  if (!result.ok) {
+    return;
+  }
+  const credential = JSON.parse(result.stdout);
+  if (!credential?.api_key) {
+    return;
+  }
+  const credentialResult = await runScript("scripts/privacy-security.ts", ["save-credential", "--vault-root", state.vaultRoot], JSON.stringify({
+    service: "openai-compatible",
+    api_key: credential.api_key,
+    base_url: baseUrl,
+    model
+  }));
+  if (!credentialResult.ok) {
+    throw new Error(credentialResult.stderr || "更新 API 配置元数据失败。");
+  }
+  process.env.AI_KB_OPENAI_API_KEY = credential.api_key;
 }
 
 function getPipelineState() {
   return {
     phase: pipelinePhase,
-    label: pipelinePhaseLabel(pipelinePhase),
+    substep: pipelineSubstep,
+    label: pipelinePhaseLabel(pipelinePhase, pipelineSubstep),
+    error: pipelineError,
+    can_retry: Boolean(pipelineError && lastPipelineRetry),
     updated_at: new Date().toISOString()
   };
 }
 
-function pipelinePhaseLabel(phase) {
+function pipelinePhaseLabel(phase, substep) {
+  if (substep === "copying") {
+    return "复制中";
+  }
+  if (substep === "normalizing") {
+    return "标准化中";
+  }
+  if (substep === "extracting") {
+    return "AI 提炼中";
+  }
+
   const labels = {
     idle: "空闲",
     importing: "正在导入",
-    processing: "正在提炼",
+    processing: "正在处理",
     waiting_review: "等待审查",
-    done: "已完成"
+    done: "已完成",
+    failed: "处理失败"
   };
   return labels[phase] ?? "空闲";
 }

@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld("desktopApi", {
   getState: () => ipcRenderer.invoke("app:get-state"),
   chooseVault: () => ipcRenderer.invoke("vault:choose"),
   chooseImportFiles: (sourceApp) => ipcRenderer.invoke("import:choose-files", sourceApp),
+  retryImport: () => ipcRenderer.invoke("import:retry"),
   runImport: () => ipcRenderer.invoke("workflow:run-import"),
   runDaily: () => ipcRenderer.invoke("workflow:run-daily"),
   listAtoms: () => ipcRenderer.invoke("atoms:list"),

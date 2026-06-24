@@ -25,6 +25,8 @@ export interface ManualImportNormalizationInput {
   default_sensitivity_when_missing?: Sensitivity;
   // 仅处理指定 raw_path，避免重复处理 imports 目录中的历史文件
   only_raw_paths?: VaultRelativePath[];
+  // 自动进入 P2 的链路不写 P1 占位卡片，避免待确认区重复噪音
+  write_pending_atoms?: boolean;
   raw_imports_dir?: VaultRelativePath;
   sqlite_path?: VaultRelativePath;
   knowledge_dir?: VaultRelativePath;
@@ -44,6 +46,9 @@ export interface ManualImportNormalizationSummary {
   generated_atom_count: number;
   failed_file_count: number;
   failures: ManualImportNormalizationFailure[];
+  imported_raw_paths: VaultRelativePath[];
+  normalized_record_ids: string[];
+  generated_atom_ids: string[];
 }
 
 export async function runManualImportNormalization(
@@ -69,7 +74,10 @@ export async function runManualImportNormalization(
     normalized_record_count: 0,
     generated_atom_count: 0,
     failed_file_count: 0,
-    failures: []
+    failures: [],
+    imported_raw_paths: importedRawPaths,
+    normalized_record_ids: normalizedRecordIds,
+    generated_atom_ids: generatedAtomIds
   };
 
   try {
@@ -110,7 +118,9 @@ export async function runManualImportNormalization(
         }));
         await storage.saveNormalizedRecords(records);
 
-        const atoms = records.filter((record) => record.can_enter_personal_kb).map(buildP1PendingKnowledgeAtom);
+        const atoms = input.write_pending_atoms === false
+          ? []
+          : records.filter((record) => record.can_enter_personal_kb).map(buildP1PendingKnowledgeAtom);
         for (const atom of atoms) {
           await storage.writeKnowledgeAtom(buildKnowledgeAtomMarkdownDocument(atom));
         }

@@ -30,6 +30,24 @@ export function useDismissedHint(section: HintSection): [boolean, () => void] {
   return [dismissed, dismiss];
 }
 
+/** 表单字段标签行：文字与 (?) 帮助图标同一行，控件仍在下一行 */
+export function FieldLabel({
+  children,
+  help,
+  helpDetail
+}: {
+  children: React.ReactNode;
+  help?: string;
+  helpDetail?: string;
+}) {
+  return (
+    <span className="labelWithHint">
+      {children}
+      {help && <HelpTip title={help} {...(helpDetail ? { detail: helpDetail } : {})} />}
+    </span>
+  );
+}
+
 /** 小号 (?) 图标，悬停显示说明 */
 export function HelpTip({ title, detail }: { title: string; detail?: string }) {
   const bubbleText = detail ?? title;
