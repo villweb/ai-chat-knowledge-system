@@ -1391,7 +1391,7 @@ function App() {
               </button>
             )}
             <button className="iconOnly" onClick={() => void refresh()} title="刷新" disabled={busy}>
-              <RefreshCw size={18} />
+              <RefreshCw size={16} />
             </button>
           </div>
         </header>
@@ -1625,7 +1625,7 @@ function ReviewSuccessBanner({
       <div className="reviewSuccessActions">
         <button className="primary" onClick={onGoLibrary} title="查看刚批准的知识"><BookOpenCheck size={16} />去知识库查看</button>
         {remainingPending > 0 && (
-          <button onClick={onContinueReview} title="继续审查下一条待确认"><ListChecks size={16} />继续审查下一条</button>
+          <button className="secondary" onClick={onContinueReview} title="继续审查下一条待确认"><ListChecks size={16} />继续审查下一条</button>
         )}
         <button className="iconOnly" onClick={onDismiss} title="关闭"><X size={16} /></button>
       </div>
@@ -1721,7 +1721,7 @@ function GuidePanel({
         </div>
         <div className="actions" style={{ marginTop: 14 }}>
           <button className="primary" onClick={onGoImport}><FileInput size={16} />导入聊天文件</button>
-          {counts.pending > 0 && <button onClick={onGoPending}><ListChecks size={16} />审查待确认 ({counts.pending})</button>}
+          {counts.pending > 0 && <button className="secondary" onClick={onGoPending}><ListChecks size={16} />审查待确认 ({counts.pending})</button>}
         </div>
       </section>
       <section className="panel">
@@ -1876,7 +1876,7 @@ function ImportPanel({
             {pipeline.phase === "failed" && pipeline.error && <p className="muted">{pipeline.error}</p>}
             {pipeline.phase === "failed" && pipeline.can_retry && (
               <button type="button" className="secondary" onClick={onRetryImport} disabled={busy}>
-                <RefreshCw size={15} />
+                <RefreshCw size={16} />
                 <span>一键重试</span>
               </button>
             )}
@@ -1890,7 +1890,7 @@ function ImportPanel({
               disabled={busy}
               title="选择文件后自动复制到导入目录、标准化记录、AI 提炼候选，并跳转到待确认"
             >
-              <FolderOpen size={17} />
+              <FolderOpen size={16} />
               <span>{busy ? "正在处理..." : "选择文件并自动处理"}</span>
             </button>
             <HelpTip title="一键完成导入全流程" detail="复制文件、标准化、AI 提炼候选。完成后请到「待确认」逐条审查。" />
@@ -1898,8 +1898,8 @@ function ImportPanel({
           <HintText>自动执行：复制到导入目录 → 标准化 → AI 提炼 → 进入「待确认」</HintText>
         </div>
         <div className="importFlowLinks">
-          <button type="button" onClick={onGoPending} disabled={busy} title="查看 AI 生成的候选知识并审查"><ListChecks size={15} />去待确认</button>
-          <button type="button" onClick={onGoLibrary} disabled={busy} title="搜索、导出已批准的知识"><BookOpenCheck size={15} />去知识库</button>
+          <button type="button" className="secondary" onClick={onGoPending} disabled={busy} title="查看 AI 生成的候选知识并审查"><ListChecks size={16} />去待确认</button>
+          <button type="button" className="secondary" onClick={onGoLibrary} disabled={busy} title="搜索、导出已批准的知识"><BookOpenCheck size={16} />去知识库</button>
         </div>
       </section>
       <section className="panel">
@@ -1908,7 +1908,7 @@ function ImportPanel({
           hint="文件已在导入目录但未处理时使用，不会重新选文件。"
           help="只运行 P1 标准化，不触发 AI 提炼。一般导入按钮已包含此步骤。"
         />
-        <button onClick={onRunNormalize} disabled={busy} title="对导入目录中已有文件重新运行标准化"><Play size={17} /><span>仅运行标准化</span></button>
+        <button className="secondary" onClick={onRunNormalize} disabled={busy} title="对导入目录中已有文件重新运行标准化"><Play size={16} /><span>仅运行标准化</span></button>
       </section>
     </div>
   );
@@ -1945,16 +1945,16 @@ function RunResultCard({
         <>
           <p className="muted">导入目录里没有需要处理的新文件。若你刚导入过，流程已在导入时自动跑完。</p>
           <div className="runResultLinks">
-            <button type="button" onClick={onGoLibrary}><BookOpenCheck size={15} />去知识库</button>
-            <button type="button" onClick={onGoLogs}><Archive size={15} />查看日志</button>
+            <button type="button" className="secondary" onClick={onGoLibrary}><BookOpenCheck size={16} />去知识库</button>
+            <button type="button" className="secondary" onClick={onGoLogs}><Archive size={16} />查看日志</button>
           </div>
         </>
       ) : (
         <>
           <p className="muted">没有新的待确认条目。可能内容已入库，或本次仅完成标准化未产生候选。</p>
           <div className="runResultLinks">
-            <button type="button" onClick={onGoLibrary}><BookOpenCheck size={15} />去知识库</button>
-            <button type="button" onClick={onGoLogs}><Archive size={15} />查看日志</button>
+            <button type="button" className="secondary" onClick={onGoLibrary}><BookOpenCheck size={16} />去知识库</button>
+            <button type="button" className="secondary" onClick={onGoLogs}><Archive size={16} />查看日志</button>
           </div>
         </>
       )}
@@ -2029,7 +2029,7 @@ function RunPanel({
             disabled={busy}
             title="立即处理导入目录中所有新文件，生成候选后去「待确认」审查"
           >
-            <Play size={17} />
+            <Play size={16} />
             <span>{busy ? "正在处理..." : "立即运行"}</span>
           </button>
           <HintText>现在处理导入目录里所有新文件；完成后去「待确认」逐条审查</HintText>
@@ -2049,7 +2049,7 @@ function RunPanel({
           <p className="muted">用于补跑某一天的历史记录，一般不需要。</p>
           <div className="actions">
             <label className="fullField compactField">重跑日期<input type="date" value={rerunDate} onChange={(event) => setRerunDate(event.target.value)} /></label>
-            <button onClick={() => onRerunDate(rerunDate)} disabled={busy || !rerunDate}><CalendarClock size={16} />重跑日期</button>
+            <button className="secondary" onClick={() => onRerunDate(rerunDate)} disabled={busy || !rerunDate}><CalendarClock size={16} />重跑日期</button>
           </div>
         </details>
       </section>
@@ -2077,7 +2077,7 @@ function RunPanel({
             <span>{automation.pending_run.reason}</span>
             <div className="actions">
               <button className="primary" onClick={onConfirmAutomation} disabled={busy} title="确认后开始本次定时沉淀任务"><Check size={16} />确认运行</button>
-              <button onClick={onSkipAutomation} disabled={busy} title="跳过本次定时任务，等待下一次"><X size={16} />跳过本次</button>
+              <button className="secondary" onClick={onSkipAutomation} disabled={busy} title="跳过本次定时任务，等待下一次"><X size={16} />跳过本次</button>
             </div>
           </div>
         )}
@@ -2097,7 +2097,9 @@ function RunPanel({
           <label>重试次数<input type="number" min="0" value={settings.retry_count} onChange={(event) => updateSetting("retry_count", Number(event.target.value))} /></label>
           <label>重试间隔分钟<input type="number" min="0" value={settings.retry_delay_minutes} onChange={(event) => updateSetting("retry_delay_minutes", Number(event.target.value))} /></label>
         </div>
-        <button className="primary" onClick={() => onSaveAutomation(settings)} disabled={busy} title="保存定时任务的所有配置项"><Bell size={17} /><span>保存定时设置</span></button>
+        <div className="actions runActions">
+          <button className="primary" onClick={() => onSaveAutomation(settings)} disabled={busy} title="保存定时任务的所有配置项"><Bell size={16} /><span>保存定时设置</span></button>
+        </div>
       </section>
 
       <section className="panel">
@@ -2189,7 +2191,7 @@ function LibraryPanel({
         {showRecentHighlight && (
           <div className="libraryRecentBar">
             <span>正在高亮刚批准的知识</span>
-            <button type="button" onClick={onClearFocus} title="取消高亮，显示全部知识">显示全部</button>
+            <button type="button" className="ghost" onClick={onClearFocus} title="取消高亮，显示全部知识">显示全部</button>
           </div>
         )}
         <div className="listHeader">
@@ -2207,10 +2209,10 @@ function LibraryPanel({
           <label><Filter size={15} />状态<select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">全部</option>{knowledge.facets.statuses.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select></label>
         </div>
         <div className="libraryToolbar">
-          <button onClick={onExport} disabled={busy} title="将全部已批准知识导出为 Markdown 文件"><Download size={16} />导出 Markdown</button>
-          <button onClick={onObsidian} disabled={busy} title="生成 Obsidian 兼容的索引和文件结构"><BookOpenCheck size={16} />Obsidian 索引</button>
-          <button onClick={onBackup} disabled={busy} title="创建知识库完整备份到本地"><HardDriveDownload size={16} />备份</button>
-          <button onClick={onRestore} disabled={busy} title="从最近一次备份恢复知识库"><RefreshCw size={16} />恢复最近备份</button>
+          <button className="secondary" onClick={onExport} disabled={busy} title="将全部已批准知识导出为 Markdown 文件"><Download size={16} />导出 Markdown</button>
+          <button className="secondary" onClick={onObsidian} disabled={busy} title="生成 Obsidian 兼容的索引和文件结构"><BookOpenCheck size={16} />Obsidian 索引</button>
+          <button className="secondary" onClick={onBackup} disabled={busy} title="创建知识库完整备份到本地"><HardDriveDownload size={16} />备份</button>
+          <button className="secondary" onClick={onRestore} disabled={busy} title="从最近一次备份恢复知识库"><RefreshCw size={16} />恢复最近备份</button>
         </div>
       </section>
 
@@ -2254,9 +2256,9 @@ function LibraryPanel({
                 <span>{group.items.length} 条相似知识</span>
                 {group.items.map((item) => (
                   <div className="duplicateRow" key={item.atom.atom_id}>
-                    <button onClick={() => onSelect(item.atom.atom_id)}>{item.atom.title}</button>
+                    <button className="ghost" onClick={() => onSelect(item.atom.atom_id)}>{item.atom.title}</button>
                     {target && item.atom.atom_id !== target.atom.atom_id && (
-                      <button onClick={() => onMerge(item.atom.atom_id, target.atom.atom_id)} disabled={busy} title="将相似知识合并到首条，避免重复"><Split size={15} />合并到首条</button>
+                      <button className="secondary" onClick={() => onMerge(item.atom.atom_id, target.atom.atom_id)} disabled={busy} title="将相似知识合并到首条，避免重复"><Split size={16} />合并到首条</button>
                     )}
                   </div>
                 ))}
@@ -2340,8 +2342,8 @@ function PrivacyPanel({
         </div>
         <div className="privacyActions">
           <button className="primary" onClick={() => onSaveSettings(settings)} disabled={busy} title="保存隐私和安全相关配置"><Shield size={16} />保存设置</button>
-          <button onClick={onApplyRetention} disabled={busy} title="按当前保留策略清理过期原始文件"><Trash2 size={16} />执行保留策略</button>
-          <button onClick={onWriteLegalDrafts} disabled={busy} title="在本地生成隐私政策和用户协议草案"><FileText size={16} />生成协议草案</button>
+          <button className="secondary" onClick={onApplyRetention} disabled={busy} title="按当前保留策略清理过期原始文件"><Trash2 size={16} />执行保留策略</button>
+          <button className="secondary" onClick={onWriteLegalDrafts} disabled={busy} title="在本地生成隐私政策和用户协议草案"><FileText size={16} />生成协议草案</button>
         </div>
         <div className="secureState"><KeyRound size={16} /><span>API Key：{privacy.secure_credentials.openai_compatible_saved ? `已加密保存 ${privacy.secure_credentials.updated_at ?? ""}` : "未保存到本地"}</span></div>
       </section>
@@ -2349,7 +2351,9 @@ function PrivacyPanel({
       <section className="panel">
         <h2>敏感内容扫描</h2>
         <label className="fullField">待扫描文本<textarea value={scanText} onChange={(event) => setScanText(event.target.value)} /></label>
-        <button className="primary" onClick={() => void onScan(scanText).then(setScanResult)} disabled={busy}><Search size={16} />扫描</button>
+        <div className="privacyActions">
+          <button className="primary" onClick={() => void onScan(scanText).then(setScanResult)} disabled={busy}><Search size={16} />扫描</button>
+        </div>
         {scanResult && <div className="scanResult"><strong>{scanResult.sensitivity} · {scanResult.can_enter_personal_kb ? "可进入个人库" : "默认阻断"}</strong>{scanResult.findings.map((finding, index) => <span key={`${finding.rule_id}-${index}`}>{finding.label} · {finding.severity} · {finding.match_preview}</span>)}{scanResult.findings.length === 0 && <span>未发现敏感规则命中</span>}</div>}
       </section>
 
@@ -2362,9 +2366,9 @@ function PrivacyPanel({
         <h2>用户数据</h2>
         <div className="formGrid"><label>删除来源<select value={sourceToDelete} onChange={(event) => setSourceToDelete(event.target.value)}>{connectors.map((connector) => <option key={connector.source_app} value={connector.source_app}>{connector.display_name}</option>)}</select></label></div>
         <div className="privacyActions">
-          <button onClick={() => onDeleteSource(sourceToDelete)} disabled={busy}><Trash2 size={16} />删除来源数据</button>
-          <button onClick={onExportUserData} disabled={busy}><Download size={16} />导出用户数据</button>
-          <button onClick={onDeleteAllUserData} disabled={busy}><Trash2 size={16} />彻底删除本地数据</button>
+          <button className="danger" onClick={() => onDeleteSource(sourceToDelete)} disabled={busy}><Trash2 size={16} />删除来源数据</button>
+          <button className="secondary" onClick={onExportUserData} disabled={busy}><Download size={16} />导出用户数据</button>
+          <button className="danger" onClick={onDeleteAllUserData} disabled={busy}><Trash2 size={16} />彻底删除本地数据</button>
         </div>
       </section>
 
@@ -2456,7 +2460,7 @@ function CommercialPanel({
         </div>
         <label>账号邮箱<input value={accountEmail} onChange={(event) => setAccountEmail(event.target.value)} placeholder="you@example.com" /></label>
         <div className="commercialActions">
-          <button onClick={() => onSaveAccount(accountEmail)} disabled={busy || !accountEmail.trim()}><KeyRound size={16} />保存账号入口</button>
+          <button className="secondary" onClick={() => onSaveAccount(accountEmail)} disabled={busy || !accountEmail.trim()}><KeyRound size={16} />保存账号入口</button>
         </div>
       </section>
 
@@ -2660,11 +2664,12 @@ function PendingPanel({
                   })}
                   title="批准后将进入正式知识库"
                 >
-                  <Check size={15} />
+                  <Check size={16} />
                   <span>批准</span>
                 </button>
                 <button
                   type="button"
+                  className="danger"
                   disabled={busy}
                   onClick={() => onInlineReview({
                     atom_id: item.atom.atom_id,
@@ -2676,11 +2681,11 @@ function PendingPanel({
                   })}
                   title="拒绝后不会进入知识库"
                 >
-                  <X size={15} />
+                  <X size={16} />
                   <span>拒绝</span>
                 </button>
                 <button type="button" className="secondary" disabled={busy} onClick={() => onSelect(item.atom.atom_id)} title="打开详情页编辑后审查">
-                  <SquarePen size={15} />
+                  <SquarePen size={16} />
                   <span>详情</span>
                 </button>
               </div>
@@ -2767,10 +2772,10 @@ function DetailPanel({
       <label className="fullField">内容<textarea value={content} onChange={(event) => setContent(event.target.value)} /></label>
       <div className="evidence"><strong>证据</strong><p>{document.atom.evidence}</p><small>{document.atom.source_raw_paths.join(", ")}</small></div>
       <div className="actions">
-        <button onClick={() => onUpdate(baseInput)} disabled={busy} title="保存标题、类型、标签和正文的修改"><SquarePen size={16} />保存</button>
-        <button onClick={() => onReview({ ...baseInput, review_status: "approved" })} disabled={busy} title="批准后将进入正式知识库，可在知识库搜索和使用"><Check size={16} />批准</button>
-        <button onClick={() => onReview({ ...baseInput, review_status: "rejected" })} disabled={busy} title="拒绝后不会进入知识库，可从列表中移除"><X size={16} />拒绝</button>
-        <button onClick={() => onReview({ ...baseInput, review_status: "merged", merged_into: mergedInto })} disabled={busy || !mergedInto} title="将本条知识合并到已选目标，避免重复"><Split size={16} />合并</button>
+        <button className="secondary" onClick={() => onUpdate(baseInput)} disabled={busy} title="保存标题、类型、标签和正文的修改"><SquarePen size={16} />保存</button>
+        <button className="primary" onClick={() => onReview({ ...baseInput, review_status: "approved" })} disabled={busy} title="批准后将进入正式知识库，可在知识库搜索和使用"><Check size={16} />批准</button>
+        <button className="danger" onClick={() => onReview({ ...baseInput, review_status: "rejected" })} disabled={busy} title="拒绝后不会进入知识库，可从列表中移除"><X size={16} />拒绝</button>
+        <button className="secondary" onClick={() => onReview({ ...baseInput, review_status: "merged", merged_into: mergedInto })} disabled={busy || !mergedInto} title="将本条知识合并到已选目标，避免重复"><Split size={16} />合并</button>
       </div>
     </section>
   );
@@ -2893,6 +2898,7 @@ function SettingsPanel({
             </label>
           )}
         </div>
+        <div className="actions runActions">
         <button
           className="primary"
           onClick={() => onSave({
@@ -2906,9 +2912,10 @@ function SettingsPanel({
           disabled={busy}
           title="保存来源、AI 服务和 API 配置"
         >
-          <Shield size={17} />
+          <Shield size={16} />
           <span>保存会话配置</span>
         </button>
+        </div>
       </section>
 
       <section className="panel releasePanel">
@@ -2924,7 +2931,9 @@ function SettingsPanel({
           <span>更新地址</span><strong>{state.release.update_url}</strong>
           <span>卸载策略</span><strong>{state.release.uninstall_policy === "retain_user_data" ? "保留用户数据" : state.release.uninstall_policy}</strong>
         </div>
-        <button className="secondary" onClick={onCheckUpdates} disabled={busy || !state.release.update_enabled}><PackageCheck size={17} /><span>检查更新</span></button>
+        <div className="actions runActions">
+        <button className="secondary" onClick={onCheckUpdates} disabled={busy || !state.release.update_enabled}><PackageCheck size={16} /><span>检查更新</span></button>
+        </div>
       </section>
     </div>
   );
