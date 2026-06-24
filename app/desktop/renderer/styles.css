@@ -944,7 +944,8 @@ nav {
   flex: 1;
 }
 
-/* 工作区主 CTA：覆盖共用基础里的透明底，使用 primary 深绿 */
+/* 工作区主 CTA（设置、引导、隐私、导入等）：覆盖共用基础里的透明底，使用 primary 深绿 */
+.settingsPanel .actions button.primary,
 .actions button.primary,
 .privacyActions button.primary,
 .importCtaRow .importCta.primary {
@@ -953,6 +954,7 @@ nav {
   border-color: var(--btn-primary-bg);
 }
 
+.settingsPanel .actions button.primary:hover:not(:disabled),
 .actions button.primary:hover:not(:disabled),
 .privacyActions button.primary:hover:not(:disabled),
 .importCtaRow .importCta.primary:hover:not(:disabled) {
