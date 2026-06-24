@@ -1531,11 +1531,12 @@ nav {
   font-weight: 650;
 }
 
-.formGrid label > span:first-child,
-.formGrid label > :first-child:not(select):not(input):not(textarea) {
+/* 标签文字与帮助图标同一行；避免 formGrid label 的 grid 把二者拆成两行 */
+.labelWithHint {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
+  min-height: 18px;
 }
 
 .formGrid input,
@@ -1603,6 +1604,9 @@ nav {
 }
 
 .runSectionTitle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   margin: 16px 0 8px;
   font-size: 14px;
   color: #17221f;

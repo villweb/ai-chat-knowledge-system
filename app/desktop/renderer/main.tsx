@@ -42,7 +42,7 @@ import {
   resolvePresetId,
   type AiProviderPresetId
 } from "../ai-provider-presets";
-import { FirstTimeBanner, HelpTip, HintText, SectionHeading } from "./help-components";
+import { FieldLabel, FirstTimeBanner, HelpTip, HintText, SectionHeading } from "./help-components";
 
 type ReviewStatus = "pending" | "approved" | "rejected" | "merged";
 type KnowledgeAtomType = "观点" | "方法" | "决策" | "经验" | "素材" | "问题" | "偏好";
@@ -1822,8 +1822,9 @@ function ImportPanel({
         )}
         <div className="formGrid importSourceGrid">
           <label>
-            来源平台
-            <HelpTip title="选择导出文件来自哪个 AI 平台" detail="决定文件复制到 raw/imports 下的哪个子目录。" />
+            <FieldLabel help="选择导出文件来自哪个 AI 平台" helpDetail="决定文件复制到 raw/imports 下的哪个子目录。">
+              来源平台
+            </FieldLabel>
             <select value={resolvedImportSource} onChange={(event) => setSelectedSource(event.target.value)} disabled={busy || !resolvedImportSource}>
               {availableConnectors.map((connector) => (
                 <option key={connector.source_app} value={connector.source_app}>{connector.display_name}</option>
@@ -1983,7 +1984,11 @@ function RunPanel({
           help="与「导入」页的手动选文件互补：导入按钮会立即处理所选文件；此页处理目录中所有待处理文件。"
         />
 
-        <h3 className="runSectionTitle">什么时候需要点这里？<HelpTip title="使用场景" detail="刚用导入按钮处理过则无需再来；适合丢文件进目录后统一处理或开启定时任务。" /></h3>
+        <h3 className="runSectionTitle">
+          <FieldLabel help="使用场景" helpDetail="刚用导入按钮处理过则无需再来；适合丢文件进目录后统一处理或开启定时任务。">
+            什么时候需要点这里？
+          </FieldLabel>
+        </h3>
         <ul className="runWhenList">
           <li>你已经把文件放进 raw/imports，但没有走「导入」页的按钮</li>
           <li>你想手动重跑全部待处理文件</li>
@@ -2845,16 +2850,18 @@ function SettingsPanel({
         )}
         <div className="formGrid">
           <label>
-            默认来源
-            <HelpTip title="导入文件的默认平台" detail="决定 raw/imports 下的子目录和默认连接器。" />
+            <FieldLabel help="导入文件的默认平台" helpDetail="决定 raw/imports 下的子目录和默认连接器。">
+              默认来源
+            </FieldLabel>
             <select value={sourceApp} onChange={(event) => setSourceApp(event.target.value)}>{state.connectors.filter((connector) => connector.status === "available" && connector.enabled).map((connector) => <option key={connector.source_app} value={connector.source_app}>{connector.display_name}</option>)}</select>
           </label>
           <label>
-            AI 服务商
-            <HelpTip
-              title="官方接口与中转的区别"
-              detail="常见服务商已预填官方 OpenAI 兼容地址，无需手输 URL。若使用第三方中转或自建网关，请选择「自定义（手动填写）」并填写 Base URL。"
-            />
+            <FieldLabel
+              help="官方接口与中转的区别"
+              helpDetail="常见服务商已预填官方 OpenAI 兼容地址，无需手输 URL。若使用第三方中转或自建网关，请选择「自定义（手动填写）」并填写 Base URL。"
+            >
+              AI 服务商
+            </FieldLabel>
             <select value={presetId} onChange={(event) => handlePresetChange(event.target.value as AiProviderPresetId)}>
               {AI_PROVIDER_PRESETS.map((preset) => (
                 <option key={preset.id} value={preset.id}>{preset.label}</option>
@@ -2863,18 +2870,20 @@ function SettingsPanel({
           </label>
           {showCustomBaseUrl && showRealAiFields && (
             <label>
-              Base URL
-              <HelpTip title="自定义 API 地址" detail="填写 OpenAI 兼容接口的完整 Base URL，例如第三方中转或自建网关地址。" />
+              <FieldLabel help="自定义 API 地址" helpDetail="填写 OpenAI 兼容接口的完整 Base URL，例如第三方中转或自建网关地址。">
+                Base URL
+              </FieldLabel>
               <input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://your-relay.example.com/v1" />
             </label>
           )}
           {showRealAiFields && (
             <label>
-              模型
-              <HelpTip
-                title="调用的模型名称"
-                detail={selectedPreset?.defaultModel ? `默认推荐：${selectedPreset.defaultModel}，可按账号权限修改为其他模型。` : "填写服务商支持的模型 ID。"}
-              />
+              <FieldLabel
+                help="调用的模型名称"
+                helpDetail={selectedPreset?.defaultModel ? `默认推荐：${selectedPreset.defaultModel}，可按账号权限修改为其他模型。` : "填写服务商支持的模型 ID。"}
+              >
+                模型
+              </FieldLabel>
               <input
                 value={model}
                 onChange={(event) => setModel(event.target.value)}
@@ -2884,8 +2893,9 @@ function SettingsPanel({
           )}
           {showRealAiFields && (
             <label>
-              API Key
-              <HelpTip title="访问密钥" detail="本地加密保存；留空则保持已保存的密钥不变。" />
+              <FieldLabel help="访问密钥" helpDetail="本地加密保存；留空则保持已保存的密钥不变。">
+                API Key
+              </FieldLabel>
               <input value={apiKey} onChange={(event) => setApiKey(event.target.value)} type="password" placeholder={state.apiKeyConfigured ? "已保存，留空则不修改" : "本地加密保存"} />
             </label>
           )}
