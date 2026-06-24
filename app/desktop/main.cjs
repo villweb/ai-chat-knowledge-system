@@ -8,6 +8,7 @@ const runtimeRoot = app.isPackaged ? path.join(process.resourcesPath, "app.asar.
 const assetRoot = app.isPackaged ? app.getAppPath() : devRoot;
 const sourceApps = ["codex", "cursor", "deepseek", "doubao", "workbuddy"];
 const AUTOMATION_CHECK_MS = 30_000;
+const SESSION_CONFIG_PATH = "data/runtime/desktop-session.json";
 const releaseInfo = {
   app_name: "AI Chat Knowledge",
   app_id: "com.villweb.aichatknowledge",
@@ -23,6 +24,9 @@ const state = {
   vaultRoot: "",
   sourceApp: "codex",
   aiProvider: "fixture",
+  aiProviderPreset: "fixture",
+  aiBaseUrl: "",
+  aiModel: "",
   apiKeyConfigured: false,
   enabledConnectors: {
     codex: true,
@@ -37,6 +41,7 @@ let automationTimer = null;
 let automationRunning = false;
 let pendingAutomationRun = null;
 let lastAutomationDecision = null;
+let sessionConfigLoaded = false;
 // 桌面端流水线状态，供界面展示当前处理阶段与子步骤
 let pipelinePhase = "idle";
 let pipelineSubstep = null;
@@ -92,6 +97,7 @@ app.on("activate", () => {
 
 function registerIpc() {
   ipcMain.handle("app:get-state", async () => {
+    await ensureSessionConfigLoaded();
     const privacy = await getPrivacyState();
     return {
       ...state,
@@ -125,6 +131,17 @@ function registerIpc() {
       state.sourceApp = input.sourceApp;
     }
     state.aiProvider = input.aiProvider === "openai-compatible" ? "openai-compatible" : "fixture";
+    if (input.aiProviderPreset) {
+      state.aiProviderPreset = input.aiProviderPreset;
+    } else if (state.aiProvider === "fixture") {
+      state.aiProviderPreset = "fixture";
+    }
+    if (input.baseUrl !== undefined) {
+      state.aiBaseUrl = input.baseUrl;
+    }
+    if (input.model !== undefined) {
+      state.aiModel = input.model;
+    }
     if (input.apiKey) {
       state.apiKeyConfigured = true;
     }
@@ -133,19 +150,27 @@ function registerIpc() {
       const credentialResult = await runScript("scripts/privacy-security.ts", ["save-credential", "--vault-root", state.vaultRoot], JSON.stringify({
         service: "openai-compatible",
         api_key: input.apiKey,
-        base_url: input.baseUrl ?? "",
-        model: input.model ?? ""
+        base_url: input.baseUrl ?? state.aiBaseUrl ?? "",
+        model: input.model ?? state.aiModel ?? ""
       }));
       if (!credentialResult.ok) {
         throw new Error(credentialResult.stderr || "API Key 加密保存失败。");
       }
+    } else if (state.aiProvider === "openai-compatible" && state.apiKeyConfigured && (input.baseUrl || input.model)) {
+      await updateStoredCredentialMetadata(input.baseUrl ?? state.aiBaseUrl ?? "", input.model ?? state.aiModel ?? "");
     }
-    if (input.baseUrl) {
-      process.env.AI_KB_OPENAI_BASE_URL = input.baseUrl;
+    if (state.aiProvider === "openai-compatible") {
+      if (state.aiBaseUrl) {
+        process.env.AI_KB_OPENAI_BASE_URL = state.aiBaseUrl;
+      }
+      if (state.aiModel) {
+        process.env.AI_KB_OPENAI_MODEL = state.aiModel;
+      }
+    } else {
+      delete process.env.AI_KB_OPENAI_BASE_URL;
+      delete process.env.AI_KB_OPENAI_MODEL;
     }
-    if (input.model) {
-      process.env.AI_KB_OPENAI_MODEL = input.model;
-    }
+    await saveSessionConfig();
     pushEvent("settings_saved", input.apiKey ? "AI 服务配置已保存，API Key 已本地加密保存。" : "AI 服务配置已保存。");
     return { ok: true, aiProvider: state.aiProvider, apiKeyConfigured: state.apiKeyConfigured };
   });
@@ -946,6 +971,12 @@ async function ensureSessionConfigLoaded() {
     state.aiProvider = "openai-compatible";
   }
 
+  if (savedConfig?.ai_provider_preset) {
+    state.aiProviderPreset = savedConfig.ai_provider_preset;
+  } else if (state.aiProvider === "fixture") {
+    state.aiProviderPreset = "fixture";
+  }
+
   if (savedConfig?.base_url) {
     state.aiBaseUrl = savedConfig.base_url;
     process.env.AI_KB_OPENAI_BASE_URL = savedConfig.base_url;
@@ -971,10 +1002,32 @@ async function saveSessionConfig() {
     schema_version: "desktop_session.v1",
     source_app: state.sourceApp,
     ai_provider: state.aiProvider,
+    ai_provider_preset: state.aiProviderPreset,
     base_url: state.aiBaseUrl,
     model: state.aiModel,
     updated_at: new Date().toISOString()
   }, null, 2)}\n`, "utf8");
+}
+
+async function updateStoredCredentialMetadata(baseUrl, model) {
+  const result = await runScript("scripts/privacy-security.ts", ["load-credential", "--vault-root", state.vaultRoot]);
+  if (!result.ok) {
+    return;
+  }
+  const credential = JSON.parse(result.stdout);
+  if (!credential?.api_key) {
+    return;
+  }
+  const credentialResult = await runScript("scripts/privacy-security.ts", ["save-credential", "--vault-root", state.vaultRoot], JSON.stringify({
+    service: "openai-compatible",
+    api_key: credential.api_key,
+    base_url: baseUrl,
+    model
+  }));
+  if (!credentialResult.ok) {
+    throw new Error(credentialResult.stderr || "更新 API 配置元数据失败。");
+  }
+  process.env.AI_KB_OPENAI_API_KEY = credential.api_key;
 }
 
 function getPipelineState() {

@@ -36,6 +36,12 @@ import {
   X
 } from "lucide-react";
 import "./styles.css";
+import {
+  AI_PROVIDER_PRESETS,
+  findPresetById,
+  resolvePresetId,
+  type AiProviderPresetId
+} from "../ai-provider-presets";
 import { FirstTimeBanner, HelpTip, HintText, SectionHeading } from "./help-components";
 
 type ReviewStatus = "pending" | "approved" | "rejected" | "merged";
@@ -287,6 +293,7 @@ interface DesktopState {
   vaultRoot: string;
   sourceApp: string;
   aiProvider: string;
+  aiProviderPreset?: string;
   aiBaseUrl?: string;
   aiModel?: string;
   apiKeyConfigured: boolean;
@@ -305,6 +312,7 @@ interface DesktopState {
 interface SessionConfigInput {
   sourceApp: string;
   aiProvider: string;
+  aiProviderPreset?: string;
   baseUrl?: string;
   model?: string;
   apiKey: string;
@@ -664,7 +672,16 @@ function getDesktopApi(): DesktopApi {
     async saveSessionConfig(input) {
       previewState.sourceApp = input.sourceApp;
       previewState.aiProvider = input.aiProvider;
-      previewState.apiKeyConfigured = Boolean(input.apiKey);
+      if (input.aiProviderPreset !== undefined) {
+        previewState.aiProviderPreset = input.aiProviderPreset;
+      }
+      if (input.baseUrl !== undefined) {
+        previewState.aiBaseUrl = input.baseUrl;
+      }
+      if (input.model !== undefined) {
+        previewState.aiModel = input.model;
+      }
+      previewState.apiKeyConfigured = Boolean(input.apiKey) || previewState.apiKeyConfigured;
       return previewState;
     }
   };
@@ -2768,27 +2785,62 @@ function SettingsPanel({
   onCheckUpdates: () => void;
 }) {
   const [sourceApp, setSourceApp] = useState(state.sourceApp);
+  const [presetId, setPresetId] = useState<AiProviderPresetId>(() =>
+    resolvePresetId(state.aiProvider, state.aiBaseUrl, state.aiProviderPreset)
+  );
   const [aiProvider, setAiProvider] = useState(state.aiProvider);
   const [baseUrl, setBaseUrl] = useState(state.aiBaseUrl ?? "");
   const [model, setModel] = useState(state.aiModel ?? "");
   const [apiKey, setApiKey] = useState("");
+  const selectedPreset = findPresetById(presetId);
+  const showCustomBaseUrl = presetId === "custom";
+  const showRealAiFields = !isFixtureProvider(aiProvider);
+
+  useEffect(() => {
+    setSourceApp(state.sourceApp);
+    setPresetId(resolvePresetId(state.aiProvider, state.aiBaseUrl, state.aiProviderPreset));
+    setAiProvider(state.aiProvider);
+    setBaseUrl(state.aiBaseUrl ?? "");
+    setModel(state.aiModel ?? "");
+  }, [state.sourceApp, state.aiProvider, state.aiProviderPreset, state.aiBaseUrl, state.aiModel]);
+
+  function handlePresetChange(nextPresetId: AiProviderPresetId) {
+    const preset = findPresetById(nextPresetId);
+    if (!preset) {
+      return;
+    }
+    setPresetId(nextPresetId);
+    setAiProvider(preset.aiProvider);
+    if (preset.aiProvider === "fixture") {
+      return;
+    }
+    if (nextPresetId === "custom") {
+      return;
+    }
+    if (preset.baseUrl) {
+      setBaseUrl(preset.baseUrl);
+    }
+    if (preset.defaultModel) {
+      setModel(preset.defaultModel);
+    }
+  }
 
   return (
     <div className="grid two">
       <section className="panel settingsPanel">
         <FirstTimeBanner section="settings">
           <strong>配置 AI 服务与默认来源</strong>
-          测试模式不调用外部 API；切换为真实 AI API 后需填写 Base URL、模型和 API Key。
+          测试模式不调用外部 API；选择常见服务商后会自动填入官方接口地址，仅需填写 API Key。
         </FirstTimeBanner>
         <SectionHeading
           title="设置"
-          hint="默认来源决定导入文件保存位置；AI 服务决定提炼是否调用真实接口。"
+          hint="默认来源决定导入文件保存位置；AI 服务商决定提炼是否调用真实接口。"
           help="API Key 加密保存在本地，不会上传到云端。"
         />
         {isFixtureProvider(aiProvider) && (
           <div className="importAiNotice warning">
             <strong>当前为本地测试模式（fixture）</strong>
-            <span>不消耗 API 额度，提炼结果为本地模板。切换下方「AI 服务」并填写 DeepSeek 配置后可启用真实调用。</span>
+            <span>不消耗 API 额度，提炼结果为本地模板。切换下方「AI 服务商」为 DeepSeek 等常见服务并填写 API Key 后可启用真实调用。</span>
           </div>
         )}
         <div className="formGrid">
@@ -2798,27 +2850,62 @@ function SettingsPanel({
             <select value={sourceApp} onChange={(event) => setSourceApp(event.target.value)}>{state.connectors.filter((connector) => connector.status === "available" && connector.enabled).map((connector) => <option key={connector.source_app} value={connector.source_app}>{connector.display_name}</option>)}</select>
           </label>
           <label>
-            AI 服务
-            <HelpTip title="fixture 与真实 API 的区别" detail="fixture：本地模板，不联网、不消耗额度。真实 API：调用 OpenAI 兼容接口（如 DeepSeek）进行提炼。" />
-            <select value={aiProvider} onChange={(event) => setAiProvider(event.target.value)}><option value="fixture">本地测试模式（不调用 API）</option><option value="openai-compatible">真实 AI API（OpenAI 兼容，如 DeepSeek）</option></select>
+            AI 服务商
+            <HelpTip
+              title="官方接口与中转的区别"
+              detail="常见服务商已预填官方 OpenAI 兼容地址，无需手输 URL。若使用第三方中转或自建网关，请选择「自定义（手动填写）」并填写 Base URL。"
+            />
+            <select value={presetId} onChange={(event) => handlePresetChange(event.target.value as AiProviderPresetId)}>
+              {AI_PROVIDER_PRESETS.map((preset) => (
+                <option key={preset.id} value={preset.id}>{preset.label}</option>
+              ))}
+            </select>
           </label>
-          <label>
-            Base URL
-            <HelpTip title="API 服务地址" detail="DeepSeek 示例：https://api.deepseek.com/v1" />
-            <input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://api.deepseek.com/v1" />
-          </label>
-          <label>
-            模型
-            <HelpTip title="调用的模型名称" detail="DeepSeek 示例：deepseek-chat" />
-            <input value={model} onChange={(event) => setModel(event.target.value)} placeholder="deepseek-chat" />
-          </label>
-          <label>
-            API Key
-            <HelpTip title="访问密钥" detail="本地加密保存；留空则保持已保存的密钥不变。" />
-            <input value={apiKey} onChange={(event) => setApiKey(event.target.value)} type="password" placeholder={state.apiKeyConfigured ? "已保存，留空则不修改" : "本地加密保存"} />
-          </label>
+          {showCustomBaseUrl && showRealAiFields && (
+            <label>
+              Base URL
+              <HelpTip title="自定义 API 地址" detail="填写 OpenAI 兼容接口的完整 Base URL，例如第三方中转或自建网关地址。" />
+              <input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://your-relay.example.com/v1" />
+            </label>
+          )}
+          {showRealAiFields && (
+            <label>
+              模型
+              <HelpTip
+                title="调用的模型名称"
+                detail={selectedPreset?.defaultModel ? `默认推荐：${selectedPreset.defaultModel}，可按账号权限修改为其他模型。` : "填写服务商支持的模型 ID。"}
+              />
+              <input
+                value={model}
+                onChange={(event) => setModel(event.target.value)}
+                placeholder={selectedPreset?.defaultModel ?? "deepseek-chat"}
+              />
+            </label>
+          )}
+          {showRealAiFields && (
+            <label>
+              API Key
+              <HelpTip title="访问密钥" detail="本地加密保存；留空则保持已保存的密钥不变。" />
+              <input value={apiKey} onChange={(event) => setApiKey(event.target.value)} type="password" placeholder={state.apiKeyConfigured ? "已保存，留空则不修改" : "本地加密保存"} />
+            </label>
+          )}
         </div>
-        <button className="primary" onClick={() => onSave({ sourceApp, aiProvider, baseUrl, model, apiKey })} disabled={busy} title="保存来源、AI 服务和 API 配置"><Shield size={17} /><span>保存会话配置</span></button>
+        <button
+          className="primary"
+          onClick={() => onSave({
+            sourceApp,
+            aiProvider,
+            aiProviderPreset: presetId,
+            baseUrl: showRealAiFields ? baseUrl : "",
+            model: showRealAiFields ? model : "",
+            apiKey
+          })}
+          disabled={busy}
+          title="保存来源、AI 服务和 API 配置"
+        >
+          <Shield size={17} />
+          <span>保存会话配置</span>
+        </button>
       </section>
 
       <section className="panel releasePanel">
