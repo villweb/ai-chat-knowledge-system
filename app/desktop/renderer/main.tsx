@@ -393,20 +393,23 @@ const pipelineSubsteps = [
   { key: "extracting", label: "AI 提炼" }
 ] as const;
 
+// 主栏：高频操作（导入、确认、知识库、运行、详情）
 const primaryNavItems: Array<{ key: NavKey; label: string; icon: React.ComponentType<{ size?: number }> }> = [
   { key: "import", label: "导入", icon: FileInput },
   { key: "pending", label: "待确认", icon: ListChecks },
   { key: "library", label: "知识库", icon: BookOpenCheck },
-  { key: "settings", label: "设置", icon: Settings }
+  { key: "run", label: "运行", icon: Play },
+  { key: "detail", label: "详情", icon: SquarePen }
 ];
 
+// 更多：配置来源与低频管理
 const secondaryNavItems: Array<{ key: NavKey; label: string; icon: React.ComponentType<{ size?: number }> }> = [
   { key: "guide", label: "引导", icon: BookOpenCheck },
   { key: "sources", label: "来源", icon: Database },
-  { key: "run", label: "运行", icon: Play },
   { key: "privacy", label: "隐私", icon: Lock },
-  { key: "commercial", label: "商业", icon: BadgeCheck },
-  { key: "logs", label: "日志", icon: Archive }
+  { key: "settings", label: "设置", icon: Settings },
+  { key: "logs", label: "日志", icon: Archive },
+  { key: "commercial", label: "商业", icon: BadgeCheck }
 ];
 
 const allNavItems = [...primaryNavItems, ...secondaryNavItems];
