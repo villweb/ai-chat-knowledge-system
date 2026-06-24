@@ -374,7 +374,11 @@ declare global {
   }
 }
 
-const desktopApi = getDesktopApi();
+let previewDesktopApi: DesktopApi | null = null;
+
+function isDesktopRuntime(): boolean {
+  return Boolean(window.desktopApi);
+}
 
 const PRODUCT_GUIDE_DISMISS_KEY = "ai-kb-product-guide-dismissed";
 
@@ -420,6 +424,15 @@ function getDesktopApi(): DesktopApi {
     return window.desktopApi;
   }
 
+  if (previewDesktopApi) {
+    return previewDesktopApi;
+  }
+
+  previewDesktopApi = createPreviewDesktopApi();
+  return previewDesktopApi;
+}
+
+function createPreviewDesktopApi(): DesktopApi {
   const sampleAtom: KnowledgeAtomDocument = {
     file_path: "knowledge/inbox/2026/preview-atom.md",
     atom: {
@@ -483,15 +496,7 @@ function getDesktopApi(): DesktopApi {
       return previewState;
     },
     async chooseImportFiles() {
-      return {
-        copied_file_count: 1,
-        copied_file_names: ["preview-chat.md"],
-        source_app: "codex",
-        import_path: "raw/imports/codex",
-        auto_processed: true,
-        pending_atom_count: 1,
-        total_atom_count: previewState.atoms.length
-      };
+      throw new Error("当前为浏览器预览模式，无法打开文件选择框。请使用 npm run desktop:dev 或安装版桌面应用。");
     },
     async retryImport() {
       return {
@@ -935,7 +940,7 @@ function App() {
     const timer = window.setInterval(() => {
       void (async () => {
         try {
-          const nextState = await desktopApi.getState() as DesktopState;
+          const nextState = await getDesktopApi().getState() as DesktopState;
           if (!nextState.pipeline) {
             return;
           }
@@ -978,7 +983,7 @@ function App() {
 
   async function refresh() {
     try {
-      const nextState = await desktopApi.getState() as DesktopState;
+      const nextState = await getDesktopApi().getState() as DesktopState;
       setBootError("");
       setState(nextState);
       if (!hasInitializedNav) {
@@ -1109,13 +1114,13 @@ function App() {
       .map((item) => item.atom.atom_id);
 
     try {
-      const updateResult = await desktopApi.updateAtom(input) as KnowledgeAtomDocument & {
+      const updateResult = await getDesktopApi().updateAtom(input) as KnowledgeAtomDocument & {
         atoms?: KnowledgeAtomDocument[];
         knowledge?: KnowledgeLibraryView;
       };
       setImportBatchAtomIds((previous) => previous.filter((id) => id !== reviewedAtomId));
 
-      const nextAtoms = updateResult.atoms ?? (await desktopApi.listAtoms());
+      const nextAtoms = updateResult.atoms ?? (await getDesktopApi().listAtoms());
       const nextKnowledge = updateResult.knowledge ?? (state?.knowledge ?? {
         items: [],
         facets: { source_apps: [], types: [], projects: [], tags: [], statuses: [] },
@@ -1207,6 +1212,12 @@ function App() {
   }
 
   async function handleImport(sourceApp?: string) {
+    if (!isDesktopRuntime()) {
+      setNotice("当前为浏览器预览模式，无法打开文件选择框。请使用 npm run desktop:dev 或安装版桌面应用。");
+      setNoticeKind("error");
+      return;
+    }
+
     const targetSource = (sourceApp ?? state!.sourceApp).trim();
     if (!targetSource) {
       setNotice("没有可用的导入来源，请先在「来源」页启用至少一个连接器。");
@@ -1214,12 +1225,13 @@ function App() {
       return;
     }
     setBusy(true);
-    setNotice("");
+    setNotice("正在打开文件选择框...");
     setNoticeKind("info");
     try {
-      const result = await desktopApi.chooseImportFiles(targetSource) as ImportResult;
+      const result = await getDesktopApi().chooseImportFiles(targetSource) as ImportResult;
       if (!result.copied_file_count) {
         setNotice("未选择文件。");
+        setNoticeKind("info");
         return;
       }
       setNotice(formatImportSuccess(result));
@@ -1248,7 +1260,7 @@ function App() {
     setNotice("");
     setNoticeKind("info");
     try {
-      const result = await desktopApi.retryImport() as ImportResult;
+      const result = await getDesktopApi().retryImport() as ImportResult;
       setNotice(formatImportSuccess(result));
       setImportBatchAtomIds(result.import_batch_atom_ids ?? []);
       await refresh();
@@ -1335,7 +1347,7 @@ function App() {
         <div className="vaultBox">
           <span>知识库</span>
           <strong>{compactPath(state.vaultRoot)}</strong>
-          <button className="iconText" onClick={() => withBusy(() => desktopApi.chooseVault(), "知识库位置已更新")} disabled={busy} title="选择本地知识库存放目录">
+          <button className="iconText" onClick={() => withBusy(() => getDesktopApi().chooseVault(), "知识库位置已更新")} disabled={busy} title="选择本地知识库存放目录">
             <FolderOpen size={16} />
             <span>选择</span>
           </button>
@@ -1397,10 +1409,11 @@ function App() {
         {notice && <div className={noticeKind === "error" ? "notice error" : "notice"}>{notice}</div>}
 
         {active === "guide" && <GuidePanel state={state} counts={counts} onGoImport={() => setActive("import")} onGoPending={() => setActive("pending")} />}
-        {active === "sources" && <SourcesPanel connectors={state.connectors} sourceApp={state.sourceApp} busy={busy} onToggle={(sourceApp, enabled) => withBusy(() => desktopApi.setConnectorEnabled({ sourceApp, enabled }), "连接器状态已更新")} />}
+        {active === "sources" && <SourcesPanel connectors={state.connectors} sourceApp={state.sourceApp} busy={busy} onToggle={(sourceApp, enabled) => withBusy(() => getDesktopApi().setConnectorEnabled({ sourceApp, enabled }), "连接器状态已更新")} />}
         {active === "import" && (
           <ImportPanel
             busy={busy}
+            isDesktopRuntime={isDesktopRuntime()}
             sourceApp={state.sourceApp}
             connectors={state.connectors}
             aiProvider={state.aiProvider}
@@ -1412,9 +1425,13 @@ function App() {
             onGoPending={() => setActive("pending")}
             onGoLibrary={() => goToLibrary()}
             onImport={(source) => void handleImport(source)}
+            onImportBlocked={(message) => {
+              setNotice(message);
+              setNoticeKind("error");
+            }}
             onRetryImport={() => void handleRetryImport()}
             onGoSettings={() => setActive("settings")}
-            onRunNormalize={() => withBusy(() => desktopApi.runImport(), "标准化完成，请到「待确认」查看结果。")}
+            onRunNormalize={() => withBusy(() => getDesktopApi().runImport(), "标准化完成，请到「待确认」查看结果。")}
           />
         )}
         {active === "run" && (
@@ -1423,11 +1440,11 @@ function App() {
             events={state.events}
             automation={state.automation}
             lastRunResult={lastRunResult}
-            onRun={() => handleRunDaily(() => desktopApi.runDaily())}
-            onSaveAutomation={(input) => withBusy(() => desktopApi.saveAutomationSettings(input), "定时自动沉淀设置已保存")}
-            onConfirmAutomation={() => handleRunDaily(() => desktopApi.confirmAutomationRun(), { clearNotice: false })}
-            onSkipAutomation={() => withBusy(() => desktopApi.skipAutomationRun(), "已跳过本次自动运行")}
-            onRerunDate={(runDate) => handleRunDaily(() => desktopApi.rerunAutomationDate({ run_date: runDate }))}
+            onRun={() => handleRunDaily(() => getDesktopApi().runDaily())}
+            onSaveAutomation={(input) => withBusy(() => getDesktopApi().saveAutomationSettings(input), "定时自动沉淀设置已保存")}
+            onConfirmAutomation={() => handleRunDaily(() => getDesktopApi().confirmAutomationRun(), { clearNotice: false })}
+            onSkipAutomation={() => withBusy(() => getDesktopApi().skipAutomationRun(), "已跳过本次自动运行")}
+            onRerunDate={(runDate) => handleRunDaily(() => getDesktopApi().rerunAutomationDate({ run_date: runDate }))}
             onGoPending={() => setActive("pending")}
             onGoLibrary={() => goToLibrary()}
             onGoLogs={() => setActive("logs")}
@@ -1442,11 +1459,11 @@ function App() {
             recentlyApprovedIds={recentlyApprovedIds}
             onClearFocus={() => setLibraryFocusAtomIds([])}
             onSelect={(atomId) => { setSelectedId(atomId); setActive("detail"); }}
-            onMerge={(atomId, targetId) => withBusy(() => desktopApi.updateAtom({ atom_id: atomId, review_status: "merged", merged_into: targetId }), "知识已合并")}
-            onExport={() => withBusy(() => desktopApi.exportKnowledgeMarkdown(), "Markdown 导出完成")}
-            onObsidian={() => withBusy(() => desktopApi.ensureObsidianCompatibility(), "Obsidian 索引已更新")}
-            onBackup={() => withBusy(() => desktopApi.backupKnowledge(), "知识库备份已创建")}
-            onRestore={() => withBusy(() => desktopApi.restoreLatestKnowledgeBackup(), "最近备份已恢复")}
+            onMerge={(atomId, targetId) => withBusy(() => getDesktopApi().updateAtom({ atom_id: atomId, review_status: "merged", merged_into: targetId }), "知识已合并")}
+            onExport={() => withBusy(() => getDesktopApi().exportKnowledgeMarkdown(), "Markdown 导出完成")}
+            onObsidian={() => withBusy(() => getDesktopApi().ensureObsidianCompatibility(), "Obsidian 索引已更新")}
+            onBackup={() => withBusy(() => getDesktopApi().backupKnowledge(), "知识库备份已创建")}
+            onRestore={() => withBusy(() => getDesktopApi().restoreLatestKnowledgeBackup(), "最近备份已恢复")}
           />
         )}
         {active === "privacy" && (
@@ -1454,22 +1471,22 @@ function App() {
             privacy={state.privacy}
             connectors={state.connectors}
             busy={busy}
-            onSaveSettings={(input) => withBusy(() => desktopApi.savePrivacySettings(input), "隐私和安全设置已保存")}
-            onScan={(content) => desktopApi.scanSensitiveContent({ content })}
-            onApplyRetention={() => withBusy(() => desktopApi.applyRawRetention(), "原始记录保留策略已执行")}
-            onDeleteSource={(sourceApp) => withBusy(() => desktopApi.deleteSourceData({ source_app: sourceApp }), "来源数据已删除")}
-            onExportUserData={() => withBusy(() => desktopApi.exportUserData(), "用户数据导出完成")}
-            onDeleteAllUserData={() => withBusy(() => desktopApi.deleteAllUserData(), "本地用户数据已删除")}
-            onWriteLegalDrafts={() => withBusy(() => desktopApi.writePrivacyLegalDrafts(), "隐私政策和用户协议草案已生成")}
+            onSaveSettings={(input) => withBusy(() => getDesktopApi().savePrivacySettings(input), "隐私和安全设置已保存")}
+            onScan={(content) => getDesktopApi().scanSensitiveContent({ content })}
+            onApplyRetention={() => withBusy(() => getDesktopApi().applyRawRetention(), "原始记录保留策略已执行")}
+            onDeleteSource={(sourceApp) => withBusy(() => getDesktopApi().deleteSourceData({ source_app: sourceApp }), "来源数据已删除")}
+            onExportUserData={() => withBusy(() => getDesktopApi().exportUserData(), "用户数据导出完成")}
+            onDeleteAllUserData={() => withBusy(() => getDesktopApi().deleteAllUserData(), "本地用户数据已删除")}
+            onWriteLegalDrafts={() => withBusy(() => getDesktopApi().writePrivacyLegalDrafts(), "隐私政策和用户协议草案已生成")}
           />
         )}
         {active === "commercial" && (
           <CommercialPanel
             commercial={state.commercial}
             busy={busy}
-            onActivate={(activationCode) => withBusy(() => desktopApi.activateLicense({ activation_code: activationCode }), "授权状态已更新")}
-            onSaveAccount={(accountEmail) => withBusy(() => desktopApi.saveCommercialAccount({ account_email: accountEmail }), "账号入口已保存")}
-            onCreateFeedback={(input) => withBusy(() => desktopApi.createFeedbackDraft(input), "反馈草稿已创建")}
+            onActivate={(activationCode) => withBusy(() => getDesktopApi().activateLicense({ activation_code: activationCode }), "授权状态已更新")}
+            onSaveAccount={(accountEmail) => withBusy(() => getDesktopApi().saveCommercialAccount({ account_email: accountEmail }), "账号入口已保存")}
+            onCreateFeedback={(input) => withBusy(() => getDesktopApi().createFeedbackDraft(input), "反馈草稿已创建")}
           />
         )}
         {active === "pending" && (
@@ -1492,11 +1509,11 @@ function App() {
             document={selected}
             atoms={state.atoms}
             busy={busy}
-            onUpdate={(input) => withBusy(() => desktopApi.updateAtom(input), "知识已更新")}
+            onUpdate={(input) => withBusy(() => getDesktopApi().updateAtom(input), "知识已更新")}
             onReview={(input) => void handleAtomReview(input)}
           />
         )}
-        {active === "settings" && <SettingsPanel state={state} busy={busy} onSave={(input) => withBusy(() => desktopApi.saveSessionConfig(input), "会话配置已保存")} onCheckUpdates={() => withBusy(() => desktopApi.checkForUpdates(), "更新检查完成")} />}
+        {active === "settings" && <SettingsPanel state={state} busy={busy} onSave={(input) => withBusy(() => getDesktopApi().saveSessionConfig(input), "会话配置已保存")} onCheckUpdates={() => withBusy(() => getDesktopApi().checkForUpdates(), "更新检查完成")} />}
         {active === "logs" && <LogsPanel logs={[...state.events, ...state.logs]} />}
       </section>
     </main>
@@ -1703,6 +1720,7 @@ function SourcesPanel({ connectors, sourceApp, busy, onToggle }: { connectors: S
 
 function ImportPanel({
   busy,
+  isDesktopRuntime,
   sourceApp,
   connectors,
   aiProvider,
@@ -1714,11 +1732,13 @@ function ImportPanel({
   onGoPending,
   onGoLibrary,
   onImport,
+  onImportBlocked,
   onRetryImport,
   onGoSettings,
   onRunNormalize
 }: {
   busy: boolean;
+  isDesktopRuntime: boolean;
   sourceApp: string;
   connectors: SourceConnectorView[];
   aiProvider: string;
@@ -1730,6 +1750,7 @@ function ImportPanel({
   onGoPending: () => void;
   onGoLibrary: () => void;
   onImport: (sourceApp: string) => void;
+  onImportBlocked: (message: string) => void;
   onRetryImport: () => void;
   onGoSettings: () => void;
   onRunNormalize: () => void;
@@ -1752,8 +1773,20 @@ function ImportPanel({
     }
   }, [resolvedImportSource, selectedSource]);
 
-  const canImport = Boolean(resolvedImportSource) && !busy;
+  const canImport = isDesktopRuntime && Boolean(resolvedImportSource) && !busy;
   const selectedImportPath = resolvedImportSource ? `raw/imports/${resolvedImportSource}` : "—";
+
+  function handleImportClick() {
+    if (!isDesktopRuntime) {
+      onImportBlocked("当前为浏览器预览模式，无法打开文件选择框。请使用 npm run desktop:dev 或安装版桌面应用。");
+      return;
+    }
+    if (!resolvedImportSource) {
+      onImportBlocked("没有可用的导入来源，请先在「来源」页启用至少一个可用平台。");
+      return;
+    }
+    onImport(resolvedImportSource);
+  }
 
   return (
     <div className="grid two">
@@ -1769,6 +1802,12 @@ function ImportPanel({
           help="支持 Markdown、TXT、JSON 格式的 AI 聊天导出文件。"
         />
         <p className="panelPurpose">导入后 AI 会生成候选，你确认后进入知识库永久保存。</p>
+        {!isDesktopRuntime && (
+          <div className="importAiNotice warning">
+            <strong>当前不是桌面应用环境</strong>
+            <span>浏览器预览无法打开系统文件选择框。请运行 npm run desktop:dev 或使用已安装的桌面应用进行导入。</span>
+          </div>
+        )}
         {isFixtureProvider(aiProvider) ? (
           <div className="importAiNotice warning">
             <strong>当前为测试模式</strong>
@@ -1816,8 +1855,8 @@ function ImportPanel({
             <button
               type="button"
               className="primary importCta"
-              onClick={() => onImport(resolvedImportSource)}
-              disabled={!canImport}
+              onClick={handleImportClick}
+              disabled={!canImport && isDesktopRuntime}
               title="选择文件后自动复制到导入目录、标准化记录、AI 提炼候选，并跳转到待确认"
             >
               <FolderOpen size={16} />

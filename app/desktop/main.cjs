@@ -2,6 +2,12 @@ const { app, BrowserWindow, dialog, ipcMain, Notification, powerMonitor } = requ
 const { spawn } = require("node:child_process");
 const { copyFile, mkdir, readdir, readFile, writeFile } = require("node:fs/promises");
 const path = require("node:path");
+const {
+  assertImportSourceEnabled,
+  buildImportDialogOptions,
+  ensureEnabledConnectorsDefaults,
+  resolveImportTargetSource
+} = require("./desktop-import.cjs");
 
 const devRoot = path.resolve(__dirname, "../..");
 const runtimeRoot = app.isPackaged ? path.join(process.resourcesPath, "app.asar.unpacked") : devRoot;
@@ -77,6 +83,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   state.vaultRoot = buildDefaultVaultRoot();
+  applyEnabledConnectorDefaults();
   configureAutoUpdater();
   registerIpc();
   createWindow();
@@ -200,18 +207,23 @@ function registerIpc() {
   });
 
   ipcMain.handle("import:choose-files", async (event, sourceApp) => {
+    applyEnabledConnectorDefaults();
     const parentWindow = BrowserWindow.fromWebContents(event.sender);
-    // 先打开文件选择框，避免来源校验失败时用户完全无法选文件
-    const result = await dialog.showOpenDialog(parentWindow ?? undefined, {
-      properties: ["openFile", "multiSelections"],
-      filters: [{ name: "AI chat exports", extensions: ["md", "markdown", "txt", "json"] }]
-    });
-    if (result.canceled) {
-      return { copied_file_count: 0, auto_processed: false };
+    if (parentWindow && !parentWindow.isDestroyed()) {
+      parentWindow.focus();
     }
 
-    const targetSource = sourceApp || state.sourceApp;
-    ensureSourceEnabled(targetSource);
+    // 先打开文件选择框，避免来源校验失败时用户完全无法选文件
+    const result = await dialog.showOpenDialog(parentWindow ?? undefined, buildImportDialogOptions());
+    if (result.canceled) {
+      return { copied_file_count: 0, auto_processed: false, canceled: true };
+    }
+
+    const targetSource = resolveImportTargetSource(sourceApp, state.sourceApp);
+    if (!targetSource) {
+      throw new Error("没有可用的导入来源，请先在「来源」页启用至少一个连接器。");
+    }
+    assertImportSourceEnabled(targetSource, state.enabledConnectors);
 
     const importPath = `raw/imports/${targetSource}`;
     const targetDir = path.join(state.vaultRoot, importPath);
@@ -918,14 +930,19 @@ function showNotification(title, body) {
   new Notification({ title, body }).show();
 }
 
+function applyEnabledConnectorDefaults() {
+  const next = ensureEnabledConnectorsDefaults(state.enabledConnectors, sourceApps, state.sourceApp);
+  state.enabledConnectors = next.enabledConnectors;
+  state.sourceApp = next.sourceApp;
+}
+
 function isSourceEnabled(sourceApp) {
   return Boolean(state.enabledConnectors[sourceApp]);
 }
 
 function ensureSourceEnabled(sourceApp) {
-  if (!isSourceEnabled(sourceApp)) {
-    throw new Error(`连接器未启用，无法读取来源：${sourceApp}`);
-  }
+  applyEnabledConnectorDefaults();
+  assertImportSourceEnabled(sourceApp, state.enabledConnectors);
 }
 
 async function listLogs() {
@@ -953,6 +970,7 @@ async function ensureSessionConfigLoaded() {
   }
 
   sessionConfigLoaded = true;
+  applyEnabledConnectorDefaults();
   const configPath = path.join(state.vaultRoot, SESSION_CONFIG_PATH);
   let savedConfig = null;
   try {
