@@ -1528,7 +1528,7 @@ function FixtureModeBanner({ onGoSettings }: { onGoSettings: () => void }) {
         <strong>当前为本地测试模式，不调用外部 AI API，不消耗 DeepSeek 额度</strong>
         <span>提炼结果由本地模板生成。如需真实 AI 提炼，请前往「设置」切换为「真实 AI API」并配置 DeepSeek。</span>
       </div>
-      <button className="secondary" onClick={onGoSettings}><Settings size={16} />去设置</button>
+      <button className="primarySoft" onClick={onGoSettings}><Settings size={16} />去设置</button>
     </div>
   );
 }

@@ -19,6 +19,9 @@
   --btn-primary-bg: #23724f;
   --btn-primary-hover: #185d3e;
   --btn-primary-text: #ffffff;
+  --btn-primary-soft-bg: #2d8a63;
+  --btn-primary-soft-hover: #3a9d75;
+  --btn-primary-soft-text: #ffffff;
   --btn-secondary-bg: #ffffff;
   --btn-secondary-border: #d7dfdc;
   --btn-secondary-text: #17221f;
@@ -150,6 +153,7 @@ nav {
 
 /* 工作区按钮共用基础（侧栏导航除外） */
 .primary,
+.primarySoft,
 .secondary,
 .danger,
 .ghost,
@@ -186,6 +190,7 @@ nav {
 }
 
 .primary svg,
+.primarySoft svg,
 .secondary svg,
 .danger svg,
 .ghost svg,
@@ -538,36 +543,48 @@ nav {
   border-color: var(--btn-primary-hover);
 }
 
+/* 浅主操作：测试模式横幅「去设置」等，比标准 primary 略浅 */
+.primarySoft {
+  background: var(--btn-primary-soft-bg);
+  color: var(--btn-primary-soft-text);
+  border-color: var(--btn-primary-soft-bg);
+}
+
+.primarySoft:hover:not(:disabled) {
+  background: var(--btn-primary-soft-hover);
+  border-color: var(--btn-primary-soft-hover);
+}
+
 /* 次要操作：导航、导出、取消等 */
 .secondary,
-.actions button:not(.primary):not(.danger),
+.actions button:not(.primary):not(.primarySoft):not(.danger),
 .importFlowLinks button,
 .libraryToolbar button,
-.privacyActions button:not(.primary):not(.danger),
+.privacyActions button:not(.primary):not(.primarySoft):not(.danger),
 .duplicateRow button,
 .runResultLinks button,
-.reviewSuccessActions > button:not(.iconOnly):not(.primary):not(.danger),
-.commercialActions button:not(.primary):not(.danger),
+.reviewSuccessActions > button:not(.iconOnly):not(.primary):not(.primarySoft):not(.danger),
+.commercialActions button:not(.primary):not(.primarySoft):not(.danger),
 .libraryRecentBar button,
-.importPipelineProgress button:not(.primary),
-.atomInlineActions button:not(.primary):not(.danger) {
+.importPipelineProgress button:not(.primary):not(.primarySoft),
+.atomInlineActions button:not(.primary):not(.primarySoft):not(.danger) {
   background: var(--btn-secondary-bg);
   color: var(--btn-secondary-text);
   border-color: var(--btn-secondary-border);
 }
 
 .secondary:hover:not(:disabled),
-.actions button:not(.primary):not(.danger):hover:not(:disabled),
+.actions button:not(.primary):not(.primarySoft):not(.danger):hover:not(:disabled),
 .importFlowLinks button:hover:not(:disabled),
 .libraryToolbar button:hover:not(:disabled),
-.privacyActions button:not(.primary):not(.danger):hover:not(:disabled),
+.privacyActions button:not(.primary):not(.primarySoft):not(.danger):hover:not(:disabled),
 .duplicateRow button:hover:not(:disabled),
 .runResultLinks button:hover:not(:disabled),
-.reviewSuccessActions > button:not(.iconOnly):not(.primary):not(.danger):hover:not(:disabled),
-.commercialActions button:not(.primary):not(.danger):hover:not(:disabled),
+.reviewSuccessActions > button:not(.iconOnly):not(.primary):not(.primarySoft):not(.danger):hover:not(:disabled),
+.commercialActions button:not(.primary):not(.primarySoft):not(.danger):hover:not(:disabled),
 .libraryRecentBar button:hover:not(:disabled),
-.importPipelineProgress button:not(.primary):hover:not(:disabled),
-.atomInlineActions button:not(.primary):not(.danger):hover:not(:disabled) {
+.importPipelineProgress button:not(.primary):not(.primarySoft):hover:not(:disabled),
+.atomInlineActions button:not(.primary):not(.primarySoft):not(.danger):hover:not(:disabled) {
   background: var(--btn-secondary-hover);
 }
 
@@ -941,6 +958,18 @@ nav {
 .importCtaRow .importCta.primary:hover:not(:disabled) {
   background: #2d8a63;
   border-color: #2d8a63;
+}
+
+/* 浅主 CTA：覆盖共用基础里的透明底 */
+.fixtureModeBanner > button.primarySoft {
+  background: var(--btn-primary-soft-bg);
+  color: var(--btn-primary-soft-text);
+  border-color: var(--btn-primary-soft-bg);
+}
+
+.fixtureModeBanner > button.primarySoft:hover:not(:disabled) {
+  background: var(--btn-primary-soft-hover);
+  border-color: var(--btn-primary-soft-hover);
 }
 
 .hint {
