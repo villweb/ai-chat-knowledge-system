@@ -15,6 +15,7 @@ const assetRoot = app.isPackaged ? app.getAppPath() : devRoot;
 const sourceApps = ["codex", "cursor", "deepseek", "doubao", "workbuddy"];
 const AUTOMATION_CHECK_MS = 30_000;
 const SESSION_CONFIG_PATH = "data/runtime/desktop-session.json";
+const APP_SETTINGS_FILE = "desktop-app-settings.json";
 const releaseInfo = {
   app_name: "AI Chat Knowledge",
   app_id: "com.villweb.aichatknowledge",
@@ -81,8 +82,8 @@ function createWindow() {
   }
 }
 
-app.whenReady().then(() => {
-  state.vaultRoot = buildDefaultVaultRoot();
+app.whenReady().then(async () => {
+  state.vaultRoot = await resolveInitialVaultRoot();
   applyEnabledConnectorDefaults();
   configureAutoUpdater();
   registerIpc();
@@ -126,6 +127,8 @@ function registerIpc() {
     const result = await dialog.showOpenDialog(parentWindow ?? undefined, { properties: ["openDirectory"] });
     if (!result.canceled && result.filePaths[0]) {
       state.vaultRoot = result.filePaths[0];
+      resetVaultSessionState();
+      await saveAppSettings();
       pushEvent("vault_selected", `知识库位置已切换：${path.basename(state.vaultRoot)}`);
     }
     return { vaultRoot: state.vaultRoot };
@@ -202,6 +205,7 @@ function registerIpc() {
       const nextSource = connectors.find((item) => item.status === "available" && state.enabledConnectors[item.source_app]);
       state.sourceApp = nextSource?.source_app ?? "codex";
     }
+    await saveSessionConfig();
     pushEvent("connector_updated", `${connector.display_name} 已${state.enabledConnectors[input.sourceApp] ? "启用" : "停用"}。`);
     return { connectors: await listConnectors(), sourceApp: state.sourceApp };
   });
@@ -598,6 +602,37 @@ function buildDefaultVaultRoot() {
   return process.env.AI_KB_VAULT_ROOT || path.join(app.getPath("userData"), releaseInfo.default_vault_dir_name);
 }
 
+async function resolveInitialVaultRoot() {
+  if (process.env.AI_KB_VAULT_ROOT) {
+    return process.env.AI_KB_VAULT_ROOT;
+  }
+
+  try {
+    const settings = JSON.parse(await readFile(getAppSettingsPath(), "utf8"));
+    if (typeof settings.last_vault_root === "string" && settings.last_vault_root.trim()) {
+      return settings.last_vault_root;
+    }
+  } catch {
+    // 首次启动没有应用级设置时使用默认 vault
+  }
+
+  return buildDefaultVaultRoot();
+}
+
+async function saveAppSettings() {
+  const settingsPath = getAppSettingsPath();
+  await mkdir(path.dirname(settingsPath), { recursive: true });
+  await writeFile(settingsPath, `${JSON.stringify({
+    schema_version: "desktop_app_settings.v1",
+    last_vault_root: state.vaultRoot,
+    updated_at: new Date().toISOString()
+  }, null, 2)}\n`, "utf8");
+}
+
+function getAppSettingsPath() {
+  return path.join(app.getPath("userData"), APP_SETTINGS_FILE);
+}
+
 function getReleaseState() {
   return {
     ...releaseInfo,
@@ -678,7 +713,14 @@ async function getPrivacyState() {
   if (!result.ok) {
     throw new Error(result.stderr || "读取隐私安全状态失败。");
   }
-  return JSON.parse(result.stdout);
+  const privacy = JSON.parse(result.stdout);
+  return {
+    ...privacy,
+    sources: privacy.sources.map((source) => ({
+      ...source,
+      authorized: Boolean(state.enabledConnectors[source.source_app])
+    }))
+  };
 }
 
 async function getCommercialState() {
@@ -803,6 +845,7 @@ async function runDailyWorkflow(runDate, runIdPrefix, options = {}) {
   ];
   if (options.uiManualImport) {
     importArgs.push("--default-sensitivity-missing", "personal");
+    importArgs.push("--skip-pending-atoms");
     if (options.copiedRawPaths?.length) {
       for (const rawPath of options.copiedRawPaths) {
         importArgs.push("--only-raw-path", rawPath);
@@ -982,6 +1025,15 @@ async function ensureSessionConfigLoaded() {
   const privacy = await getPrivacyState();
   const credentialSaved = privacy.secure_credentials.openai_compatible_saved;
 
+  if (savedConfig?.enabled_connectors && typeof savedConfig.enabled_connectors === "object") {
+    for (const sourceApp of sourceApps) {
+      if (typeof savedConfig.enabled_connectors[sourceApp] === "boolean") {
+        state.enabledConnectors[sourceApp] = savedConfig.enabled_connectors[sourceApp];
+      }
+    }
+    applyEnabledConnectorDefaults();
+  }
+
   if (savedConfig?.source_app && isSourceEnabled(savedConfig.source_app)) {
     state.sourceApp = savedConfig.source_app;
   }
@@ -1027,8 +1079,33 @@ async function saveSessionConfig() {
     ai_provider_preset: state.aiProviderPreset,
     base_url: state.aiBaseUrl,
     model: state.aiModel,
+    enabled_connectors: state.enabledConnectors,
     updated_at: new Date().toISOString()
   }, null, 2)}\n`, "utf8");
+}
+
+function resetVaultSessionState() {
+  state.sourceApp = "codex";
+  state.aiProvider = "fixture";
+  state.aiProviderPreset = "fixture";
+  state.aiBaseUrl = "";
+  state.aiModel = "";
+  state.apiKeyConfigured = false;
+  state.enabledConnectors = {
+    codex: true,
+    cursor: true,
+    deepseek: true,
+    doubao: false,
+    workbuddy: false
+  };
+  sessionConfigLoaded = false;
+  pipelinePhase = "idle";
+  pipelineSubstep = null;
+  pipelineError = null;
+  lastPipelineRetry = null;
+  delete process.env.AI_KB_OPENAI_API_KEY;
+  delete process.env.AI_KB_OPENAI_BASE_URL;
+  delete process.env.AI_KB_OPENAI_MODEL;
 }
 
 async function updateStoredCredentialMetadata(baseUrl, model) {

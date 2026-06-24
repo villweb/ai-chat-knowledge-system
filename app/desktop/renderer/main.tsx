@@ -1211,6 +1211,15 @@ function App() {
     }
   }
 
+  function confirmDestructive(message: string): boolean {
+    return window.confirm(message);
+  }
+
+  function confirmDeleteAllUserData(): boolean {
+    const value = window.prompt("彻底删除会移除知识库、原始记录、运行记录、日志、导出和备份。请输入“确认删除”继续。");
+    return value === "确认删除";
+  }
+
   async function handleImport(sourceApp?: string) {
     if (!isDesktopRuntime()) {
       setNotice("当前为浏览器预览模式，无法打开文件选择框。请使用 npm run desktop:dev 或安装版桌面应用。");
@@ -1463,7 +1472,11 @@ function App() {
             onExport={() => withBusy(() => getDesktopApi().exportKnowledgeMarkdown(), "Markdown 导出完成")}
             onObsidian={() => withBusy(() => getDesktopApi().ensureObsidianCompatibility(), "Obsidian 索引已更新")}
             onBackup={() => withBusy(() => getDesktopApi().backupKnowledge(), "知识库备份已创建")}
-            onRestore={() => withBusy(() => getDesktopApi().restoreLatestKnowledgeBackup(), "最近备份已恢复")}
+            onRestore={() => {
+              if (confirmDestructive("恢复最近备份会覆盖当前知识库、运行记录和日志。确认继续？")) {
+                void withBusy(() => getDesktopApi().restoreLatestKnowledgeBackup(), "最近备份已恢复");
+              }
+            }}
           />
         )}
         {active === "privacy" && (
@@ -1473,10 +1486,22 @@ function App() {
             busy={busy}
             onSaveSettings={(input) => withBusy(() => getDesktopApi().savePrivacySettings(input), "隐私和安全设置已保存")}
             onScan={(content) => getDesktopApi().scanSensitiveContent({ content })}
-            onApplyRetention={() => withBusy(() => getDesktopApi().applyRawRetention(), "原始记录保留策略已执行")}
-            onDeleteSource={(sourceApp) => withBusy(() => getDesktopApi().deleteSourceData({ source_app: sourceApp }), "来源数据已删除")}
+            onApplyRetention={() => {
+              if (confirmDestructive("执行保留策略会按当前设置删除匹配的原始归档文件。确认继续？")) {
+                void withBusy(() => getDesktopApi().applyRawRetention(), "原始记录保留策略已执行");
+              }
+            }}
+            onDeleteSource={(sourceApp) => {
+              if (confirmDestructive(`删除来源数据会移除 ${sourceApp} 的导入文件和归档原始记录。确认继续？`)) {
+                void withBusy(() => getDesktopApi().deleteSourceData({ source_app: sourceApp }), "来源数据已删除");
+              }
+            }}
             onExportUserData={() => withBusy(() => getDesktopApi().exportUserData(), "用户数据导出完成")}
-            onDeleteAllUserData={() => withBusy(() => getDesktopApi().deleteAllUserData(), "本地用户数据已删除")}
+            onDeleteAllUserData={() => {
+              if (confirmDeleteAllUserData()) {
+                void withBusy(() => getDesktopApi().deleteAllUserData(), "本地用户数据已删除");
+              }
+            }}
             onWriteLegalDrafts={() => withBusy(() => getDesktopApi().writePrivacyLegalDrafts(), "隐私政策和用户协议草案已生成")}
           />
         )}
@@ -2130,7 +2155,7 @@ function LibraryPanel({
   const [type, setType] = useState("");
   const [project, setProject] = useState("");
   const [tag, setTag] = useState("");
-  const [status, setStatus] = useState("");
+  const [status, setStatus] = useState("approved");
   const focusSet = useMemo(() => new Set(focusAtomIds), [focusAtomIds]);
   const recentSet = useMemo(() => new Set(recentlyApprovedIds), [recentlyApprovedIds]);
   const showRecentHighlight = focusAtomIds.length > 0 || recentlyApprovedIds.length > 0;
@@ -2328,7 +2353,7 @@ function PrivacyPanel({
         />
         <div className="formGrid">
           <label>来源授权<select value={settings.require_source_authorization ? "yes" : "no"} onChange={(event) => updateSetting("require_source_authorization", event.target.value === "yes")}><option value="yes">需要</option><option value="no">不需要</option></select></label>
-          <label>云端 AI 处理 private<select value={settings.allow_cloud_ai_for_private ? "yes" : "no"} onChange={(event) => updateSetting("allow_cloud_ai_for_private", event.target.value === "yes")}><option value="no">禁止</option><option value="yes">允许</option></select></label>
+          <label>云端 AI 处理 private<select value="no" disabled title="MVP 暂未开放 private 内容上云；private 记录仍默认阻断。"><option value="no">暂未开放</option></select></label>
           <label>原始记录保留<select value={settings.raw_retention_mode} onChange={(event) => updateSetting("raw_retention_mode", event.target.value as RawRetentionMode)}><option value="keep_forever">长期保留</option><option value="delete_after_days">按天数删除</option><option value="delete_after_successful_run">成功运行后删除</option></select></label>
           <label>保留天数<input type="number" min="0" value={settings.raw_retention_days} onChange={(event) => updateSetting("raw_retention_days", Number(event.target.value))} /></label>
         </div>

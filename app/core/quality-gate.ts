@@ -74,20 +74,22 @@ async function checkMacPackaging(projectRoot: string): Promise<QualityCheckResul
   const builder = await readFile(path.join(projectRoot, "electron-builder.yml"), "utf8");
   const workflow = await readFile(path.join(projectRoot, ".github/workflows/release-build.yml"), "utf8");
   const passed = builder.includes("dmg") && builder.includes("zip") && workflow.includes("macos-latest");
-  return buildCheck("P10-01", "macOS 端完整冒烟验证", passed, [
+  return buildCheck("P10-01", "macOS 发布配置检查", passed, [
     "electron-builder 已配置 macOS dmg 和 zip。",
-    "GitHub Actions 已配置 macos-latest 发布构建。"
-  ], "补齐 macOS dmg/zip 构建目标和 macOS runner。");
+    "GitHub Actions 已配置 macos-latest 发布构建。",
+    "该项只验证发布配置，不等同于安装包端到端冒烟。"
+  ], "补齐 macOS dmg/zip 构建目标和 macOS runner，并单独执行真实安装包冒烟。");
 }
 
 async function checkWindowsPackaging(projectRoot: string): Promise<QualityCheckResult> {
   const builder = await readFile(path.join(projectRoot, "electron-builder.yml"), "utf8");
   const workflow = await readFile(path.join(projectRoot, ".github/workflows/release-build.yml"), "utf8");
   const passed = builder.includes("nsis") && builder.includes("portable") && workflow.includes("windows-latest");
-  return buildCheck("P10-02", "Windows 端完整冒烟验证", passed, [
+  return buildCheck("P10-02", "Windows 发布配置检查", passed, [
     "electron-builder 已配置 Windows nsis 和 portable。",
-    "GitHub Actions 已配置 windows-latest 发布构建。"
-  ], "补齐 Windows nsis/portable 构建目标和 Windows runner。");
+    "GitHub Actions 已配置 windows-latest 发布构建。",
+    "该项只验证发布配置，不等同于 Windows 安装包端到端冒烟。"
+  ], "补齐 Windows nsis/portable 构建目标和 Windows runner，并单独执行真实 Windows 冒烟。");
 }
 
 async function checkFirstLaunch(): Promise<QualityCheckResult> {

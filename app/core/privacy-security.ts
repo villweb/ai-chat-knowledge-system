@@ -2,7 +2,7 @@ import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { listSourceConnectorManifests } from "../connectors";
-import type { Sensitivity, SourceApp, VaultRelativePath } from "../schemas";
+import type { DailyRun, Sensitivity, SourceApp, VaultRelativePath } from "../schemas";
 import { resolveVaultPath } from "../storage";
 
 export type RawRetentionMode = "keep_forever" | "delete_after_days" | "delete_after_successful_run";
@@ -72,6 +72,7 @@ export interface UserDataExportSummary {
   export_dir: VaultRelativePath;
   manifest_path: VaultRelativePath;
   copied_dir_count: number;
+  excluded_paths: VaultRelativePath[];
 }
 
 export interface SourceDataDeleteSummary {
@@ -92,6 +93,7 @@ const SETTINGS_PATH = "data/runtime/privacy-security-settings.json";
 const SECURE_KEY_PATH = "data/runtime/secure/local-secret.key";
 const SECURE_CREDENTIAL_PATH = "data/runtime/secure/credentials.json.enc";
 const DATA_EXPORT_DIRS = ["knowledge", "raw", "data/runtime", "data/daily_runs", "data/backups", "logs"] as const;
+const DATA_EXPORT_EXCLUDED_PATHS = ["data/runtime/secure"] as const;
 const DATA_DELETE_DIRS = [...DATA_EXPORT_DIRS, "data/exports"] as const;
 
 export const PRIVACY_RULES: PrivacyRule[] = [
@@ -233,6 +235,17 @@ export async function applyRawRetentionPolicy(vaultRoot: string, now = new Date(
   if (settings.raw_retention_mode === "keep_forever") {
     return { mode: settings.raw_retention_mode, deleted_paths: deletedPaths };
   }
+  if (settings.raw_retention_mode === "delete_after_successful_run") {
+    for (const rawPath of await listSuccessfulRunRawArchivePaths(vaultRoot)) {
+      const absolutePath = resolveVaultPath(vaultRoot, rawPath);
+      if (await exists(absolutePath)) {
+        await rm(absolutePath, { force: true });
+        deletedPaths.push(rawPath);
+      }
+    }
+    return { mode: settings.raw_retention_mode, deleted_paths: deletedPaths };
+  }
+
   const files = await listFiles(resolveVaultPath(vaultRoot, "raw/archive"));
   const cutoff = now.getTime() - settings.raw_retention_days * 24 * 60 * 60 * 1000;
   for (const file of files) {
@@ -266,13 +279,21 @@ export async function exportUserData(vaultRoot: string, now = new Date()): Promi
   for (const dir of DATA_EXPORT_DIRS) {
     const source = resolveVaultPath(vaultRoot, dir);
     if (await exists(source)) {
-      await cp(source, path.join(absoluteExportDir, dir), { recursive: true });
+      await cp(source, path.join(absoluteExportDir, dir), {
+        recursive: true,
+        filter: (sourcePath) => !isExcludedFromUserDataExport(vaultRoot, sourcePath)
+      });
       copiedDirCount += 1;
     }
   }
   const manifestPath = `${exportDir}/manifest.json`;
-  await writeFile(resolveVaultPath(vaultRoot, manifestPath), `${JSON.stringify({ schema_version: "user_data_export.v1", created_at: now.toISOString(), copied_dirs: DATA_EXPORT_DIRS }, null, 2)}\n`, "utf8");
-  return { export_dir: exportDir, manifest_path: manifestPath, copied_dir_count: copiedDirCount };
+  await writeFile(resolveVaultPath(vaultRoot, manifestPath), `${JSON.stringify({
+    schema_version: "user_data_export.v1",
+    created_at: now.toISOString(),
+    copied_dirs: DATA_EXPORT_DIRS,
+    excluded_paths: DATA_EXPORT_EXCLUDED_PATHS
+  }, null, 2)}\n`, "utf8");
+  return { export_dir: exportDir, manifest_path: manifestPath, copied_dir_count: copiedDirCount, excluded_paths: [...DATA_EXPORT_EXCLUDED_PATHS] };
 }
 
 export async function deleteAllUserData(vaultRoot: string): Promise<UserDataDeleteSummary> {
@@ -304,6 +325,7 @@ function normalizePrivacySecuritySettings(input: Partial<PrivacySecuritySettings
   if (!Number.isInteger(settings.raw_retention_days) || settings.raw_retention_days < 0) {
     throw new Error("raw_retention_days must be a non-negative integer.");
   }
+  settings.allow_cloud_ai_for_private = false;
   return settings;
 }
 
@@ -343,6 +365,38 @@ async function listFiles(root: string): Promise<string[]> {
     if (entry.isFile()) files.push(absolutePath);
   }
   return files;
+}
+
+async function listSuccessfulRunRawArchivePaths(vaultRoot: string): Promise<VaultRelativePath[]> {
+  const dailyRunsDir = resolveVaultPath(vaultRoot, "data/daily_runs");
+  if (!await exists(dailyRunsDir)) {
+    return [];
+  }
+
+  const files = (await readdir(dailyRunsDir)).filter((file) => file.endsWith(".json"));
+  const paths = new Set<VaultRelativePath>();
+  for (const file of files) {
+    try {
+      const run = JSON.parse(await readFile(path.join(dailyRunsDir, file), "utf8")) as DailyRun;
+      if (run.status !== "completed") {
+        continue;
+      }
+      for (const rawPath of run.imported_raw_paths) {
+        if (rawPath.startsWith("raw/archive/")) {
+          paths.add(rawPath);
+        }
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return [...paths].sort();
+}
+
+function isExcludedFromUserDataExport(vaultRoot: string, sourcePath: string): boolean {
+  const relativePath = toVaultRelativePath(vaultRoot, sourcePath);
+  return DATA_EXPORT_EXCLUDED_PATHS.some((excludedPath) => relativePath === excludedPath || relativePath.startsWith(`${excludedPath}/`));
 }
 
 async function exists(absolutePath: string): Promise<boolean> {

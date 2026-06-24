@@ -67,8 +67,12 @@ const KNOWLEDGE_RUNTIME_DIRS = ["knowledge", "data/runtime", "data/daily_runs", 
 export async function buildKnowledgeLibraryView(vaultRoot: string, filters: KnowledgeLibraryFilters = {}): Promise<KnowledgeLibraryView> {
   const allItems = await listKnowledgeAtomDocuments(vaultRoot);
   const history = await listDailyRuns(vaultRoot);
+  const effectiveFilters: KnowledgeLibraryFilters = {
+    review_status: "approved",
+    ...filters
+  };
   return {
-    items: filterKnowledgeAtoms(allItems, filters),
+    items: filterKnowledgeAtoms(allItems, effectiveFilters),
     facets: buildFacets(allItems),
     duplicate_groups: findDuplicateKnowledgeGroups(allItems),
     calendar: buildDailyKnowledgeCalendar(allItems, history)
@@ -173,7 +177,7 @@ export function buildDailyKnowledgeCalendar(items: KnowledgeAtomDocument[], hist
 }
 
 export async function exportKnowledgeMarkdown(vaultRoot: string, now = new Date()): Promise<KnowledgeExportSummary> {
-  const items = await listKnowledgeAtomDocuments(vaultRoot);
+  const items = (await listKnowledgeAtomDocuments(vaultRoot)).filter((item) => item.atom.review_status === "approved");
   const timestamp = toTimestamp(now);
   const exportDir = `data/exports/markdown-${timestamp}`;
   const absoluteExportDir = resolveVaultPath(vaultRoot, exportDir);
@@ -182,12 +186,12 @@ export async function exportKnowledgeMarkdown(vaultRoot: string, now = new Date(
   const lines = ["# Knowledge Export", "", `Created at: ${now.toISOString()}`, ""];
   let exportedFileCount = 0;
   for (const item of items) {
-    const statusDir = path.join(absoluteExportDir, item.atom.review_status);
+    const statusDir = path.join(absoluteExportDir, "approved");
     await mkdir(statusDir, { recursive: true });
     const filename = `${item.atom.created_at.slice(0, 10)}-${item.atom.atom_id}-${toSafeTitle(item.atom.title)}.md`;
     const target = path.join(statusDir, filename);
     await writeFile(target, renderKnowledgeAtomMarkdown(buildKnowledgeAtomMarkdownDocument(item.atom)), "utf8");
-    lines.push(`- [[${item.atom.review_status}/${filename.replace(/\.md$/, "")}]] ${item.atom.title}`);
+    lines.push(`- [[approved/${filename.replace(/\.md$/, "")}]] ${item.atom.title}`);
     exportedFileCount += 1;
   }
 

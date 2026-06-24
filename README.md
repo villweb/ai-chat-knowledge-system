@@ -30,7 +30,7 @@ AI Chat Knowledge System 是一个本地优先的 AI 对话知识沉淀系统。
 - 原始记录、SQLite 数据库、运行日志和知识库默认保存在本机。
 - 只读取用户明确放入导入目录或通过桌面端选择的文件。
 - 不自动网页登录，不读取浏览器 Cookie，不绕过平台权限。
-- API Key 仅在当前会话中使用，不写入普通配置文件。
+- API Key 可选择本地加密保存；不填写时不会新增保存。当前加密密钥仍在本地 vault 内，尚未接入 macOS Keychain 或 Windows Credential Manager。
 - 未明确判断可进入个人知识库的内容默认按更保守策略处理。
 
 真实用户数据目录默认不提交到 Git。

@@ -10,6 +10,8 @@
   "scripts": {
     "postinstall": "npm rebuild better-sqlite3 --build-from-source",
     "sqlite:rebuild": "npm rebuild better-sqlite3 --build-from-source",
+    "doctor": "tsx scripts/doctor.ts",
+    "pretest": "npm run doctor",
     "test": "node --import tsx --test tests/*.test.ts",
     "typecheck": "tsc --noEmit",
     "desktop:dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && AI_KB_DESKTOP_DEV_SERVER=http://127.0.0.1:5173 electron app/desktop/main.cjs\"",
@@ -19,6 +21,7 @@
     "desktop:dist:mac": "tsx scripts/package-desktop.ts --mac",
     "desktop:dist:win": "tsx scripts/package-desktop.ts --win",
     "release:validate": "tsx scripts/release-config.ts",
+    "prequality:gate": "npm run doctor",
     "quality:gate": "tsx scripts/quality-gate.ts",
     "launch:readiness": "tsx scripts/launch-readiness.ts",
     "p1:codex-import": "tsx scripts/run-manual-import-normalization.ts --source-app codex",
