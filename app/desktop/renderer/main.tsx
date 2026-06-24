@@ -8,6 +8,8 @@ import {
   CalendarClock,
   CalendarDays,
   Check,
+  ChevronDown,
+  ChevronRight,
   Clock,
   Database,
   Download,
@@ -40,7 +42,8 @@ type ReviewStatus = "pending" | "approved" | "rejected" | "merged";
 type KnowledgeAtomType = "观点" | "方法" | "决策" | "经验" | "素材" | "问题" | "偏好";
 type NavKey = "guide" | "sources" | "import" | "run" | "library" | "privacy" | "commercial" | "pending" | "detail" | "settings" | "logs";
 type SourceConnectorStatus = "available" | "reserved";
-type PipelinePhase = "idle" | "importing" | "processing" | "waiting_review" | "done";
+type PipelinePhase = "idle" | "importing" | "processing" | "waiting_review" | "done" | "failed";
+type PipelineSubstep = "copying" | "normalizing" | "extracting" | null;
 type RawRetentionMode = "keep_forever" | "delete_after_days" | "delete_after_successful_run";
 type FeedbackCategory = "bug" | "feature" | "billing" | "other";
 
@@ -195,7 +198,10 @@ interface SensitiveScanResult {
 
 interface PipelineState {
   phase: PipelinePhase;
+  substep?: PipelineSubstep;
   label: string;
+  error?: string | null;
+  can_retry?: boolean;
   updated_at: string;
 }
 
@@ -318,6 +324,7 @@ interface DesktopApi {
   getState(): Promise<DesktopState>;
   chooseVault(): Promise<DesktopState>;
   chooseImportFiles(sourceApp: string): Promise<ImportResult>;
+  retryImport(): Promise<ImportResult>;
   runImport(): Promise<unknown>;
   runDaily(): Promise<unknown>;
   listAtoms(): Promise<KnowledgeAtomDocument[]>;
@@ -372,19 +379,29 @@ const flowJourneySteps = [
 
 const flowJourneyPageKeys: NavKey[] = ["import", "run", "pending", "library", "detail"];
 
-const navItems: Array<{ key: NavKey; label: string; icon: React.ComponentType<{ size?: number }> }> = [
+const pipelineSubsteps = [
+  { key: "copying", label: "复制中" },
+  { key: "normalizing", label: "标准化" },
+  { key: "extracting", label: "AI 提炼" }
+] as const;
+
+const primaryNavItems: Array<{ key: NavKey; label: string; icon: React.ComponentType<{ size?: number }> }> = [
+  { key: "import", label: "导入", icon: FileInput },
+  { key: "pending", label: "待确认", icon: ListChecks },
+  { key: "library", label: "知识库", icon: BookOpenCheck },
+  { key: "settings", label: "设置", icon: Settings }
+];
+
+const secondaryNavItems: Array<{ key: NavKey; label: string; icon: React.ComponentType<{ size?: number }> }> = [
   { key: "guide", label: "引导", icon: BookOpenCheck },
   { key: "sources", label: "来源", icon: Database },
-  { key: "import", label: "导入", icon: FileInput },
   { key: "run", label: "运行", icon: Play },
-  { key: "library", label: "知识库", icon: BookOpenCheck },
   { key: "privacy", label: "隐私", icon: Lock },
   { key: "commercial", label: "商业", icon: BadgeCheck },
-  { key: "pending", label: "待确认", icon: ListChecks },
-  { key: "detail", label: "详情", icon: SquarePen },
-  { key: "settings", label: "设置", icon: Settings },
   { key: "logs", label: "日志", icon: Archive }
 ];
+
+const allNavItems = [...primaryNavItems, ...secondaryNavItems];
 
 const typeOptions: KnowledgeAtomType[] = ["观点", "方法", "决策", "经验", "素材", "问题", "偏好"];
 
@@ -470,6 +487,13 @@ function getDesktopApi(): DesktopApi {
         source_app: "codex",
         import_path: "raw/imports/codex",
         auto_processed: true,
+        pending_atom_count: 1,
+        total_atom_count: previewState.atoms.length
+      };
+    },
+    async retryImport() {
+      return {
+        copied_file_count: 1,
         pending_atom_count: 1,
         total_atom_count: previewState.atoms.length
       };
@@ -873,10 +897,46 @@ function App() {
     nextPendingId: string;
   } | null>(null);
   const [lastRunResult, setLastRunResult] = useState<DailyRunResult | null>(null);
+  const [moreNavOpen, setMoreNavOpen] = useState(() => {
+    try {
+      return localStorage.getItem("ai-kb-more-nav-open") === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    if (secondaryNavItems.some((item) => item.key === active)) {
+      setMoreNavOpen(true);
+    }
+  }, [active]);
 
   useEffect(() => {
     void refresh();
   }, []);
+
+  // 处理进行中轮询流水线子步骤
+  useEffect(() => {
+    if (!busy) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      void (async () => {
+        try {
+          const nextState = await desktopApi.getState() as DesktopState;
+          if (!nextState.pipeline) {
+            return;
+          }
+          setState((previous) => (previous ? { ...previous, pipeline: nextState.pipeline! } : previous));
+        } catch {
+          // 轮询失败时忽略，避免打断主流程
+        }
+      })();
+    }, 400);
+
+    return () => window.clearInterval(timer);
+  }, [busy]);
 
   const selected = useMemo(() => {
     return state?.atoms.find((item) => item.atom.atom_id === selectedId) ?? state?.atoms[0] ?? null;
@@ -893,16 +953,16 @@ function App() {
   }, [state]);
 
   const pipeline = useMemo(() => {
-    if (busy) {
-      return { phase: "processing" as PipelinePhase, label: "正在处理" };
+    if (state?.pipeline && (busy || state.pipeline.phase === "failed" || state.pipeline.substep)) {
+      return state.pipeline;
     }
     if (counts.pending > 0) {
-      return { phase: "waiting_review" as PipelinePhase, label: "等待审查" };
+      return { phase: "waiting_review" as PipelinePhase, label: "等待审查", updated_at: new Date().toISOString() };
     }
     if (state?.pipeline && state.pipeline.phase !== "waiting_review") {
       return state.pipeline;
     }
-    return { phase: "idle" as PipelinePhase, label: "空闲" };
+    return { phase: "idle" as PipelinePhase, label: "空闲", updated_at: new Date().toISOString() };
   }, [busy, counts.pending, state?.pipeline]);
 
   async function refresh() {
@@ -1047,7 +1107,7 @@ function App() {
     setNotice(`${reviewLabel}，全部待确认已处理完毕。`);
   }
 
-  async function handleAtomReview(input: AtomUpdateInput) {
+  async function handleAtomReview(input: AtomUpdateInput, options?: { stayOnList?: boolean }) {
     setBusy(true);
     setNotice("");
     setNoticeKind("info");
@@ -1081,6 +1141,21 @@ function App() {
           knowledge: nextKnowledge
         };
       });
+
+      if (options?.stayOnList) {
+        const freshPending = nextAtoms.filter((item) => item.atom.review_status === "pending");
+        const reviewLabel = reviewStatusLabel(input.review_status);
+        if (input.review_status === "approved") {
+          setRecentlyApprovedIds((previous) => [reviewedAtomId, ...previous.filter((id) => id !== reviewedAtomId)]);
+        }
+        if (freshPending.length > 0) {
+          setNotice(`${reviewLabel}，剩余 ${freshPending.length} 条待确认。`);
+        } else {
+          setNotice(`${reviewLabel}，全部待确认已处理完毕。`);
+        }
+        setActive("pending");
+        return;
+      }
 
       await applyReviewNavigation(reviewedAtomId, pendingBefore, nextAtoms, input.review_status);
     } catch (error) {
@@ -1139,12 +1214,13 @@ function App() {
     }
   }
 
-  async function handleImport() {
+  async function handleImport(sourceApp?: string) {
+    const targetSource = sourceApp ?? state!.sourceApp;
     setBusy(true);
     setNotice("");
     setNoticeKind("info");
     try {
-      const result = await desktopApi.chooseImportFiles(state!.sourceApp) as ImportResult;
+      const result = await desktopApi.chooseImportFiles(targetSource) as ImportResult;
       if (!result.copied_file_count) {
         setNotice("未选择文件。");
         return;
@@ -1164,9 +1240,60 @@ function App() {
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
       setNoticeKind("error");
+      await refresh();
     } finally {
       setBusy(false);
     }
+  }
+
+  async function handleRetryImport() {
+    setBusy(true);
+    setNotice("");
+    setNoticeKind("info");
+    try {
+      const result = await desktopApi.retryImport() as ImportResult;
+      setNotice(formatImportSuccess(result));
+      setImportBatchAtomIds(result.import_batch_atom_ids ?? []);
+      await refresh();
+      if ((result.pending_atom_count ?? 0) > 0) {
+        setActive("pending");
+      }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+      setNoticeKind("error");
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function toggleMoreNav() {
+    setMoreNavOpen((current) => {
+      const next = !current;
+      try {
+        localStorage.setItem("ai-kb-more-nav-open", next ? "1" : "0");
+      } catch {
+        // 忽略本地存储不可用
+      }
+      return next;
+    });
+  }
+
+  function renderNavButton(item: { key: NavKey; label: string; icon: React.ComponentType<{ size?: number }> }) {
+    const Icon = item.icon;
+    const showBadge = item.key === "pending" && counts.pending > 0;
+    return (
+      <button
+        key={item.key}
+        className={active === item.key ? "nav active" : "nav"}
+        onClick={() => setActive(item.key)}
+        title={item.label}
+      >
+        <Icon size={18} />
+        <span>{item.label}</span>
+        {showBadge && <span className="navBadge">{counts.pending}</span>}
+      </button>
+    );
   }
 
   if (!state) {
@@ -1196,17 +1323,17 @@ function App() {
           </div>
         </div>
         <nav>
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const showBadge = item.key === "pending" && counts.pending > 0;
-            return (
-              <button key={item.key} className={active === item.key ? "nav active" : "nav"} onClick={() => setActive(item.key)} title={item.label}>
-                <Icon size={18} />
-                <span>{item.label}</span>
-                {showBadge && <span className="navBadge">{counts.pending}</span>}
-              </button>
-            );
-          })}
+          {primaryNavItems.map(renderNavButton)}
+          <button
+            type="button"
+            className={moreNavOpen ? "nav navMoreToggle open" : "nav navMoreToggle"}
+            onClick={toggleMoreNav}
+            title="展开或收起高级功能"
+          >
+            {moreNavOpen ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+            <span>更多</span>
+          </button>
+          {moreNavOpen && <div className="navSecondary">{secondaryNavItems.map(renderNavButton)}</div>}
         </nav>
         <div className="vaultBox">
           <span>知识库</span>
@@ -1225,7 +1352,12 @@ function App() {
             <p>{subtitleFor(active)}</p>
           </div>
           <div className="topbarActions">
-            <PipelineStatusBar pipeline={pipeline} pendingCount={counts.pending} />
+            <PipelineStatusBar
+              pipeline={pipeline}
+              pendingCount={counts.pending}
+              {...(pipeline.can_retry ? { onRetry: () => { void handleRetryImport(); } } : {})}
+              busy={busy}
+            />
             {counts.pending > 0 && active !== "pending" && (
               <button
                 className="primary nextAction"
@@ -1283,14 +1415,17 @@ function App() {
           <ImportPanel
             busy={busy}
             sourceApp={state.sourceApp}
+            connectors={state.connectors}
             aiProvider={state.aiProvider}
+            pipeline={pipeline}
             importPath={`raw/imports/${state.sourceApp}`}
             isEmptyVault={state.atoms.length === 0}
             productGuideDismissed={productGuideDismissed}
             onDismissProductGuide={dismissProductGuide}
             onGoPending={() => setActive("pending")}
             onGoLibrary={() => goToLibrary()}
-            onImport={() => void handleImport()}
+            onImport={(source) => void handleImport(source)}
+            onRetryImport={() => void handleRetryImport()}
             onGoSettings={() => setActive("settings")}
             onRunNormalize={() => withBusy(() => desktopApi.runImport(), "标准化完成，请到「待确认」查看结果。")}
           />
@@ -1357,8 +1492,10 @@ function App() {
             query={query}
             selectedId={selected?.atom.atom_id ?? ""}
             importBatchAtomIds={importBatchAtomIds}
+            busy={busy}
             onQuery={setQuery}
             onSelect={(atomId) => { setSelectedId(atomId); setActive("detail"); }}
+            onInlineReview={(input) => void handleAtomReview(input, { stayOnList: true })}
             onClearImportBatch={() => setImportBatchAtomIds([])}
             onGoLibrary={() => goToLibrary()}
           />
@@ -1492,12 +1629,51 @@ function ProductGuideCard({ onDismiss }: { onDismiss: () => void }) {
   );
 }
 
-function PipelineStatusBar({ pipeline, pendingCount }: { pipeline: { phase: PipelinePhase; label: string }; pendingCount: number }) {
+function PipelineStatusBar({
+  pipeline,
+  pendingCount,
+  onRetry,
+  busy
+}: {
+  pipeline: PipelineState;
+  pendingCount: number;
+  onRetry?: () => void;
+  busy?: boolean;
+}) {
+  const activeSubstepIndex = pipeline.substep
+    ? pipelineSubsteps.findIndex((item) => item.key === pipeline.substep)
+    : -1;
+  const showSubsteps = pipeline.phase === "importing" || pipeline.phase === "processing" || Boolean(pipeline.substep);
+
   return (
-    <div className={`pipelineStatus phase-${pipeline.phase}`}>
-      <Clock size={15} />
-      <span>{pipeline.label}</span>
-      {pendingCount > 0 && <span className="pipelineMeta">待确认 {pendingCount}</span>}
+    <div className={`pipelineStatusWrap phase-${pipeline.phase}`}>
+      <div className={`pipelineStatus phase-${pipeline.phase}`}>
+        <Clock size={15} />
+        <span>{pipeline.label}</span>
+        {pendingCount > 0 && pipeline.phase !== "failed" && <span className="pipelineMeta">待确认 {pendingCount}</span>}
+        {pipeline.phase === "failed" && onRetry && (
+          <button type="button" className="pipelineRetry" onClick={onRetry} disabled={busy} title="从标准化步骤重试处理">
+            <RefreshCw size={14} />
+            <span>重试</span>
+          </button>
+        )}
+      </div>
+      {showSubsteps && (
+        <div className="pipelineSubsteps" aria-label="处理进度">
+          {pipelineSubsteps.map((item, index) => {
+            const isDone = activeSubstepIndex > index;
+            const isActive = activeSubstepIndex === index;
+            return (
+              <span
+                key={item.key}
+                className={["pipelineSubstep", isDone ? "done" : "", isActive ? "active" : ""].filter(Boolean).join(" ")}
+              >
+                {item.label}
+              </span>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -1592,7 +1768,9 @@ function SourcesPanel({ connectors, sourceApp, busy, onToggle }: { connectors: S
 function ImportPanel({
   busy,
   sourceApp,
+  connectors,
   aiProvider,
+  pipeline,
   importPath,
   isEmptyVault,
   productGuideDismissed,
@@ -1600,22 +1778,37 @@ function ImportPanel({
   onGoPending,
   onGoLibrary,
   onImport,
+  onRetryImport,
   onGoSettings,
   onRunNormalize
 }: {
   busy: boolean;
   sourceApp: string;
+  connectors: SourceConnectorView[];
   aiProvider: string;
+  pipeline: PipelineState;
   importPath: string;
   isEmptyVault: boolean;
   productGuideDismissed: boolean;
   onDismissProductGuide: () => void;
   onGoPending: () => void;
   onGoLibrary: () => void;
-  onImport: () => void;
+  onImport: (sourceApp: string) => void;
+  onRetryImport: () => void;
   onGoSettings: () => void;
   onRunNormalize: () => void;
 }) {
+  const availableConnectors = connectors.filter((connector) => connector.status === "available" && connector.enabled);
+  const [selectedSource, setSelectedSource] = useState(sourceApp);
+
+  useEffect(() => {
+    if (availableConnectors.some((connector) => connector.source_app === sourceApp)) {
+      setSelectedSource(sourceApp);
+    }
+  }, [sourceApp, connectors]);
+
+  const selectedImportPath = `raw/imports/${selectedSource}`;
+
   return (
     <div className="grid two">
       <section className="panel">
@@ -1642,15 +1835,38 @@ function ImportPanel({
             <span>P2 提炼将调用已配置的 OpenAI 兼容接口（如 DeepSeek）。</span>
           </div>
         )}
-        <div className="importMeta">
-          <span>当前来源：{sourceApp}</span>
-          <span>保存位置：{importPath}</span>
+        <div className="formGrid importSourceGrid">
+          <label>
+            来源平台
+            <HelpTip title="选择导出文件来自哪个 AI 平台" detail="决定文件复制到 raw/imports 下的哪个子目录。" />
+            <select value={selectedSource} onChange={(event) => setSelectedSource(event.target.value)} disabled={busy}>
+              {availableConnectors.map((connector) => (
+                <option key={connector.source_app} value={connector.source_app}>{connector.display_name}</option>
+              ))}
+            </select>
+          </label>
         </div>
+        <div className="importMeta">
+          <span>当前来源：{selectedSource}</span>
+          <span>保存位置：{selectedImportPath}</span>
+        </div>
+        {(busy || pipeline.phase === "failed") && (
+          <div className={`importPipelineProgress phase-${pipeline.phase}`}>
+            <strong>{pipeline.label}</strong>
+            {pipeline.phase === "failed" && pipeline.error && <p className="muted">{pipeline.error}</p>}
+            {pipeline.phase === "failed" && pipeline.can_retry && (
+              <button type="button" className="secondary" onClick={onRetryImport} disabled={busy}>
+                <RefreshCw size={15} />
+                <span>一键重试</span>
+              </button>
+            )}
+          </div>
+        )}
         <div className="buttonHintWrap">
           <div className="importCtaRow">
             <button
               className="primary importCta"
-              onClick={onImport}
+              onClick={() => onImport(selectedSource)}
               disabled={busy}
               title="选择文件后自动复制到导入目录、标准化记录、AI 提炼候选，并跳转到待确认"
             >
@@ -2265,8 +2481,10 @@ function PendingPanel({
   query,
   selectedId,
   importBatchAtomIds,
+  busy,
   onQuery,
   onSelect,
+  onInlineReview,
   onClearImportBatch,
   onGoLibrary
 }: {
@@ -2275,8 +2493,10 @@ function PendingPanel({
   query: string;
   selectedId: string;
   importBatchAtomIds: string[];
+  busy: boolean;
   onQuery: (value: string) => void;
   onSelect: (atomId: string) => void;
+  onInlineReview: (input: AtomUpdateInput) => void;
   onClearImportBatch: () => void;
   onGoLibrary: () => void;
 }) {
@@ -2386,21 +2606,82 @@ function PendingPanel({
       </div>
       <div className="atomList">
         {filteredAtoms.map((item) => (
-          <button
-            key={item.atom.atom_id}
-            className={[
-              selectedId === item.atom.atom_id ? "atomRow active" : "atomRow",
-              importBatchSet.has(item.atom.atom_id) ? "importBatch" : ""
-            ].filter(Boolean).join(" ")}
-            onClick={() => onSelect(item.atom.atom_id)}
-          >
-            <strong>{item.atom.title}</strong>
-            <span>
-              {importBatchSet.has(item.atom.atom_id) && <em className="importBatchTag">本次导入</em>}
-              {item.atom.type} · {item.atom.review_status} · {item.atom.source_app}
-            </span>
-            <small>{item.atom.evidence}</small>
-          </button>
+          statusFilter === "pending" ? (
+            <article
+              key={item.atom.atom_id}
+              className={[
+                "atomRow",
+                "atomRowInline",
+                selectedId === item.atom.atom_id ? "active" : "",
+                importBatchSet.has(item.atom.atom_id) ? "importBatch" : ""
+              ].filter(Boolean).join(" ")}
+            >
+              <div className="atomRowMain">
+                <strong>{item.atom.title}</strong>
+                <span>
+                  {importBatchSet.has(item.atom.atom_id) && <em className="importBatchTag">本次导入</em>}
+                  {item.atom.type} · {item.atom.source_app}
+                </span>
+                <p className="atomPreview">{item.atom.content}</p>
+                <small>{item.atom.evidence}</small>
+              </div>
+              <div className="atomInlineActions">
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={busy}
+                  onClick={() => onInlineReview({
+                    atom_id: item.atom.atom_id,
+                    title: item.atom.title,
+                    type: item.atom.type,
+                    content: item.atom.content,
+                    tags: item.atom.tags,
+                    review_status: "approved"
+                  })}
+                  title="批准后将进入正式知识库"
+                >
+                  <Check size={15} />
+                  <span>批准</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => onInlineReview({
+                    atom_id: item.atom.atom_id,
+                    title: item.atom.title,
+                    type: item.atom.type,
+                    content: item.atom.content,
+                    tags: item.atom.tags,
+                    review_status: "rejected"
+                  })}
+                  title="拒绝后不会进入知识库"
+                >
+                  <X size={15} />
+                  <span>拒绝</span>
+                </button>
+                <button type="button" className="secondary" disabled={busy} onClick={() => onSelect(item.atom.atom_id)} title="打开详情页编辑后审查">
+                  <SquarePen size={15} />
+                  <span>详情</span>
+                </button>
+              </div>
+            </article>
+          ) : (
+            <button
+              key={item.atom.atom_id}
+              className={[
+                selectedId === item.atom.atom_id ? "atomRow active" : "atomRow",
+                importBatchSet.has(item.atom.atom_id) ? "importBatch" : ""
+              ].filter(Boolean).join(" ")}
+              onClick={() => onSelect(item.atom.atom_id)}
+            >
+              <strong>{item.atom.title}</strong>
+              <span>
+                {importBatchSet.has(item.atom.atom_id) && <em className="importBatchTag">本次导入</em>}
+                {item.atom.type} · {item.atom.review_status} · {item.atom.source_app}
+              </span>
+              <small>{item.atom.evidence}</small>
+            </button>
+          )
         ))}
         {filteredAtoms.length === 0 && (
           <div className="emptyState">
@@ -2601,7 +2882,7 @@ function reviewStatusLabel(status?: ReviewStatus): string {
 }
 
 function titleFor(active: NavKey): string {
-  return navItems.find((item) => item.key === active)?.label ?? "工作台";
+  return allNavItems.find((item) => item.key === active)?.label ?? (active === "detail" ? "详情" : "工作台");
 }
 
 function subtitleFor(active: NavKey): string {

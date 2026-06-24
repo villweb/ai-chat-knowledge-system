@@ -237,6 +237,12 @@ nav {
   justify-content: flex-end;
 }
 
+.pipelineStatusWrap {
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+}
+
 .pipelineStatus {
   display: inline-flex;
   align-items: center;
@@ -268,6 +274,161 @@ nav {
   border-color: #b8dfc4;
   background: #eef9f1;
   color: #1d6333;
+}
+
+.pipelineStatus.phase-failed {
+  border-color: #efb8b8;
+  background: #fff3f3;
+  color: #7a1f1f;
+}
+
+.pipelineRetry {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 4px;
+  padding: 0 8px;
+  border: 1px solid #efb8b8;
+  border-radius: 999px;
+  min-height: 28px;
+  background: #ffffff;
+  color: #7a1f1f;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.pipelineSubsteps {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.pipelineSubstep {
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid #d9e1de;
+  background: #ffffff;
+  color: #64736e;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.pipelineSubstep.active {
+  border-color: #b8d9f0;
+  background: #edf6ff;
+  color: #16364f;
+}
+
+.pipelineSubstep.done {
+  border-color: #b8dfc4;
+  background: #eef9f1;
+  color: #1d6333;
+}
+
+.navMoreToggle {
+  color: #a9b8b3;
+}
+
+.navMoreToggle.open {
+  color: #ffffff;
+}
+
+.navSecondary {
+  display: grid;
+  gap: 4px;
+  padding-left: 8px;
+  border-left: 1px solid #2f413c;
+}
+
+.navSecondary .nav {
+  min-height: 36px;
+  font-size: 13px;
+}
+
+.importSourceGrid {
+  margin-top: 8px;
+}
+
+.importPipelineProgress {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+  padding: 12px 14px;
+  border: 1px solid #d9e1de;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.importPipelineProgress.phase-failed {
+  border-color: #efb8b8;
+  background: #fff8f8;
+}
+
+.importPipelineProgress strong {
+  color: #16364f;
+}
+
+.importPipelineProgress.phase-failed strong {
+  color: #7a1f1f;
+}
+
+.atomRowInline {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid #d9e1de;
+  border-radius: 8px;
+  background: #ffffff;
+  text-align: left;
+}
+
+.atomRowMain {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.atomPreview {
+  margin: 0;
+  color: #3b4a46;
+  font-size: 13px;
+  line-height: 1.55;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.atomInlineActions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 88px;
+}
+
+.atomInlineActions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid #d9e1de;
+  border-radius: 8px;
+  background: #f7faf9;
+  color: #33413d;
+  font-size: 12px;
+}
+
+.atomInlineActions button.primary {
+  border-color: #7fd15a;
+  background: #7fd15a;
+  color: #101815;
 }
 
 .pipelineMeta {

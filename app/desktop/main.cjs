@@ -1,5 +1,4 @@
 const { app, BrowserWindow, dialog, ipcMain, Notification, powerMonitor } = require("electron");
-const { autoUpdater } = require("electron-updater");
 const { spawn } = require("node:child_process");
 const { copyFile, mkdir, readdir, readFile, writeFile } = require("node:fs/promises");
 const path = require("node:path");
@@ -38,8 +37,15 @@ let automationTimer = null;
 let automationRunning = false;
 let pendingAutomationRun = null;
 let lastAutomationDecision = null;
-// 桌面端流水线状态，供界面展示当前处理阶段
+// 桌面端流水线状态，供界面展示当前处理阶段与子步骤
 let pipelinePhase = "idle";
+let pipelineSubstep = null;
+let pipelineError = null;
+let lastPipelineRetry = null;
+
+function getAutoUpdater() {
+  return require("electron-updater").autoUpdater;
+}
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -191,14 +197,27 @@ function registerIpc() {
     }
 
     pipelinePhase = "importing";
+    pipelineSubstep = "copying";
+    pipelineError = null;
     pushEvent("manual_import_files", `已导入 ${result.filePaths.length} 个文件到 ${importPath}，正在自动标准化和提炼...`);
 
     try {
       pipelinePhase = "processing";
+      pipelineSubstep = "normalizing";
+      lastPipelineRetry = {
+        kind: "manual_import",
+        source_app: targetSource,
+        copied_raw_paths: copiedRawPaths,
+        copied_file_names: copiedNames,
+        copied_file_count: result.filePaths.length,
+        import_path: importPath
+      };
       const pipelineResult = await runDailyWorkflow(undefined, undefined, {
         uiManualImport: true,
-        copiedRawPaths
+        copiedRawPaths,
+        sourceApp: targetSource
       });
+      pipelineSubstep = null;
       const atoms = await listAtoms();
       const pendingCount = atoms.filter((item) => item.atom.review_status === "pending").length;
       const importSummary = parseScriptStdout(pipelineResult.importResult);
@@ -235,7 +254,70 @@ function registerIpc() {
         ...pipelineResult
       };
     } catch (error) {
-      pipelinePhase = "idle";
+      pipelinePhase = "failed";
+      pipelineSubstep = null;
+      pipelineError = toErrorMessage(error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle("import:retry", async () => {
+    if (!lastPipelineRetry) {
+      throw new Error("没有可重试的导入任务。");
+    }
+
+    const ctx = lastPipelineRetry;
+    pipelineError = null;
+    pipelinePhase = "processing";
+    pipelineSubstep = "normalizing";
+
+    try {
+      if (ctx.kind === "manual_import") {
+        const pipelineResult = await runDailyWorkflow(undefined, undefined, {
+          uiManualImport: true,
+          copiedRawPaths: ctx.copied_raw_paths,
+          sourceApp: ctx.source_app
+        });
+        pipelineSubstep = null;
+        const atoms = await listAtoms();
+        const pendingCount = atoms.filter((item) => item.atom.review_status === "pending").length;
+        const importSummary = parseScriptStdout(pipelineResult.importResult);
+        const extractSummary = parseScriptStdout(pipelineResult.extractResult);
+        const importBatchAtomIds = Array.from(new Set([
+          ...(importSummary?.generated_atom_ids ?? []),
+          ...(extractSummary?.generated_atom_ids ?? [])
+        ]));
+        pipelinePhase = pendingCount > 0 ? "waiting_review" : "done";
+        pushEvent("import_pipeline_retried", `重试完成：${pendingCount} 条知识待确认。`);
+        return {
+          copied_file_count: ctx.copied_file_count,
+          copied_file_names: ctx.copied_file_names,
+          copied_raw_paths: ctx.copied_raw_paths,
+          source_app: ctx.source_app,
+          import_path: ctx.import_path,
+          auto_processed: true,
+          pending_atom_count: pendingCount,
+          total_atom_count: atoms.length,
+          normalized_record_count: importSummary?.normalized_record_count ?? 0,
+          generated_atom_count: Math.max(
+            importSummary?.generated_atom_count ?? 0,
+            extractSummary?.generated_atom_count ?? 0
+          ),
+          failed_file_count: importSummary?.failed_file_count ?? 0,
+          blocked_record_count: extractSummary?.blocked_record_count ?? 0,
+          import_batch_atom_ids: importBatchAtomIds,
+          import_batch_record_ids: importSummary?.normalized_record_ids ?? [],
+          used_personal_default: true,
+          pipeline: getPipelineState(),
+          ...pipelineResult
+        };
+      }
+
+      throw new Error("不支持的重试类型。");
+    } catch (error) {
+      pipelinePhase = "failed";
+      pipelineSubstep = null;
+      pipelineError = toErrorMessage(error);
       throw error;
     }
   });
@@ -260,7 +342,9 @@ function registerIpc() {
       pushEvent("p1_import", `导入和标准化完成，${pendingCount} 条知识待确认。`);
       return { ...result, pending_atom_count: pendingCount, pipeline: getPipelineState() };
     } catch (error) {
-      pipelinePhase = "idle";
+      pipelinePhase = "failed";
+      pipelineSubstep = null;
+      pipelineError = toErrorMessage(error);
       throw error;
     }
   });
@@ -274,7 +358,9 @@ function registerIpc() {
       pushEvent("daily_run", `每日沉淀完成，${result.pending_atom_count} 条知识待确认。`);
       return result;
     } catch (error) {
-      pipelinePhase = "idle";
+      pipelinePhase = "failed";
+      pipelineSubstep = null;
+      pipelineError = toErrorMessage(error);
       throw error;
     }
   });
@@ -483,6 +569,7 @@ function getReleaseState() {
 }
 
 function configureAutoUpdater() {
+  const autoUpdater = getAutoUpdater();
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
   const updateUrl = process.env[releaseInfo.update_url_env];
@@ -493,6 +580,7 @@ async function checkForUpdates() {
   if (!app.isPackaged && !process.env[releaseInfo.update_url_env]) {
     return { enabled: false, message: "未配置更新发布地址。" };
   }
+  const autoUpdater = getAutoUpdater();
   const result = await autoUpdater.checkForUpdates();
   return { enabled: true, update_info: result?.updateInfo ?? null };
 }
@@ -664,10 +752,11 @@ async function runAutomationDate(runDate, reason) {
 }
 
 async function runDailyWorkflow(runDate, runIdPrefix, options = {}) {
-  ensureSourceEnabled(state.sourceApp);
+  const activeSourceApp = options.sourceApp ?? state.sourceApp;
+  ensureSourceEnabled(activeSourceApp);
   const importArgs = [
     "--source-app",
-    state.sourceApp,
+    activeSourceApp,
     "--vault-root",
     state.vaultRoot
   ];
@@ -681,7 +770,7 @@ async function runDailyWorkflow(runDate, runIdPrefix, options = {}) {
   }
   const extractArgs = [
     "--source-app",
-    state.sourceApp,
+    activeSourceApp,
     "--provider",
     state.aiProvider,
     "--allow-ai",
@@ -693,6 +782,7 @@ async function runDailyWorkflow(runDate, runIdPrefix, options = {}) {
     extractArgs.push("--run-date", runDate, "--run-id", `${runIdPrefix}_extract`);
   }
 
+  pipelineSubstep = "normalizing";
   const importResult = await runScript("scripts/run-manual-import-normalization.ts", importArgs);
   if (!importResult.ok) {
     pushEvent("daily_run", importResult.stderr);
@@ -710,6 +800,7 @@ async function runDailyWorkflow(runDate, runIdPrefix, options = {}) {
     await loadSecureCredentialIntoEnv();
   }
 
+  pipelineSubstep = "extracting";
   const extractResult = await runScript("scripts/extract-knowledge-atoms.ts", extractArgs);
   if (!extractResult.ok) {
     pushEvent("daily_run", extractResult.stderr);
@@ -889,18 +980,32 @@ async function saveSessionConfig() {
 function getPipelineState() {
   return {
     phase: pipelinePhase,
-    label: pipelinePhaseLabel(pipelinePhase),
+    substep: pipelineSubstep,
+    label: pipelinePhaseLabel(pipelinePhase, pipelineSubstep),
+    error: pipelineError,
+    can_retry: Boolean(pipelineError && lastPipelineRetry),
     updated_at: new Date().toISOString()
   };
 }
 
-function pipelinePhaseLabel(phase) {
+function pipelinePhaseLabel(phase, substep) {
+  if (substep === "copying") {
+    return "复制中";
+  }
+  if (substep === "normalizing") {
+    return "标准化中";
+  }
+  if (substep === "extracting") {
+    return "AI 提炼中";
+  }
+
   const labels = {
     idle: "空闲",
     importing: "正在导入",
-    processing: "正在提炼",
+    processing: "正在处理",
     waiting_review: "等待审查",
-    done: "已完成"
+    done: "已完成",
+    failed: "处理失败"
   };
   return labels[phase] ?? "空闲";
 }
