@@ -1207,7 +1207,12 @@ function App() {
   }
 
   async function handleImport(sourceApp?: string) {
-    const targetSource = sourceApp ?? state!.sourceApp;
+    const targetSource = (sourceApp ?? state!.sourceApp).trim();
+    if (!targetSource) {
+      setNotice("没有可用的导入来源，请先在「来源」页启用至少一个连接器。");
+      setNoticeKind("error");
+      return;
+    }
     setBusy(true);
     setNotice("");
     setNoticeKind("info");
@@ -1732,13 +1737,23 @@ function ImportPanel({
   const availableConnectors = connectors.filter((connector) => connector.status === "available" && connector.enabled);
   const [selectedSource, setSelectedSource] = useState(sourceApp);
 
-  useEffect(() => {
-    if (availableConnectors.some((connector) => connector.source_app === sourceApp)) {
-      setSelectedSource(sourceApp);
+  // 来源下拉必须与已启用连接器保持一致，避免向 IPC 传入停用来源导致选文件前即失败
+  const resolvedImportSource = useMemo(() => {
+    if (availableConnectors.some((connector) => connector.source_app === selectedSource)) {
+      return selectedSource;
     }
-  }, [sourceApp, connectors]);
+    const preferred = availableConnectors.find((connector) => connector.source_app === sourceApp);
+    return preferred?.source_app ?? availableConnectors[0]?.source_app ?? "";
+  }, [availableConnectors, selectedSource, sourceApp]);
 
-  const selectedImportPath = `raw/imports/${selectedSource}`;
+  useEffect(() => {
+    if (resolvedImportSource && resolvedImportSource !== selectedSource) {
+      setSelectedSource(resolvedImportSource);
+    }
+  }, [resolvedImportSource, selectedSource]);
+
+  const canImport = Boolean(resolvedImportSource) && !busy;
+  const selectedImportPath = resolvedImportSource ? `raw/imports/${resolvedImportSource}` : "—";
 
   return (
     <div className="grid two">
@@ -1770,7 +1785,7 @@ function ImportPanel({
           <label>
             来源平台
             <HelpTip title="选择导出文件来自哪个 AI 平台" detail="决定文件复制到 raw/imports 下的哪个子目录。" />
-            <select value={selectedSource} onChange={(event) => setSelectedSource(event.target.value)} disabled={busy}>
+            <select value={resolvedImportSource} onChange={(event) => setSelectedSource(event.target.value)} disabled={busy || !resolvedImportSource}>
               {availableConnectors.map((connector) => (
                 <option key={connector.source_app} value={connector.source_app}>{connector.display_name}</option>
               ))}
@@ -1778,9 +1793,12 @@ function ImportPanel({
           </label>
         </div>
         <div className="importMeta">
-          <span>当前来源：{selectedSource}</span>
+          <span>当前来源：{resolvedImportSource || "未启用"}</span>
           <span>保存位置：{selectedImportPath}</span>
         </div>
+        {!resolvedImportSource && (
+          <p className="muted">请先在「来源」页启用至少一个可用平台，再选择文件导入。</p>
+        )}
         {(busy || pipeline.phase === "failed") && (
           <div className={`importPipelineProgress phase-${pipeline.phase}`}>
             <strong>{pipeline.label}</strong>
@@ -1796,9 +1814,10 @@ function ImportPanel({
         <div className="buttonHintWrap">
           <div className="importCtaRow">
             <button
+              type="button"
               className="primary importCta"
-              onClick={() => onImport(selectedSource)}
-              disabled={busy}
+              onClick={() => onImport(resolvedImportSource)}
+              disabled={!canImport}
               title="选择文件后自动复制到导入目录、标准化记录、AI 提炼候选，并跳转到待确认"
             >
               <FolderOpen size={16} />

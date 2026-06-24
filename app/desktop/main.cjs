@@ -114,8 +114,9 @@ function registerIpc() {
     };
   });
 
-  ipcMain.handle("vault:choose", async () => {
-    const result = await dialog.showOpenDialog({ properties: ["openDirectory"] });
+  ipcMain.handle("vault:choose", async (event) => {
+    const parentWindow = BrowserWindow.fromWebContents(event.sender);
+    const result = await dialog.showOpenDialog(parentWindow ?? undefined, { properties: ["openDirectory"] });
     if (!result.canceled && result.filePaths[0]) {
       state.vaultRoot = result.filePaths[0];
       pushEvent("vault_selected", `知识库位置已切换：${path.basename(state.vaultRoot)}`);
@@ -198,16 +199,19 @@ function registerIpc() {
     return { connectors: await listConnectors(), sourceApp: state.sourceApp };
   });
 
-  ipcMain.handle("import:choose-files", async (_event, sourceApp) => {
-    const targetSource = sourceApp || state.sourceApp;
-    ensureSourceEnabled(targetSource);
-    const result = await dialog.showOpenDialog({
+  ipcMain.handle("import:choose-files", async (event, sourceApp) => {
+    const parentWindow = BrowserWindow.fromWebContents(event.sender);
+    // 先打开文件选择框，避免来源校验失败时用户完全无法选文件
+    const result = await dialog.showOpenDialog(parentWindow ?? undefined, {
       properties: ["openFile", "multiSelections"],
       filters: [{ name: "AI chat exports", extensions: ["md", "markdown", "txt", "json"] }]
     });
     if (result.canceled) {
       return { copied_file_count: 0, auto_processed: false };
     }
+
+    const targetSource = sourceApp || state.sourceApp;
+    ensureSourceEnabled(targetSource);
 
     const importPath = `raw/imports/${targetSource}`;
     const targetDir = path.join(state.vaultRoot, importPath);
