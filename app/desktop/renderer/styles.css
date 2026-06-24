@@ -1317,11 +1317,10 @@ nav {
 }
 
 .listHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  margin-bottom: 12px;
+  display: grid;
+  gap: 10px;
+  margin-bottom: 0;
+  min-width: 0;
 }
 
 .statusPills {
@@ -1394,16 +1393,81 @@ nav {
   color: #33418d;
 }
 
+/* 筛选项统一布局：多行网格、标签在上、控件等高 */
+.filterBar {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 10px 12px;
+  width: 100%;
+  min-width: 0;
+  margin: 12px 0;
+}
+
+.filterField {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+}
+
+.filterField--wide {
+  grid-column: 1 / -1;
+}
+
+.filterLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 18px;
+  color: #34443f;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.filterLabel svg {
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+}
+
+.filterField select,
+.filterField input[type="text"],
+.filterField input[type="search"],
+.filterField input[type="date"],
+.filterField input[type="time"],
+.filterField input[type="number"],
+.filterField input:not([type]) {
+  width: 100%;
+  min-width: 0;
+  height: var(--btn-height-sm);
+  padding: 0 10px;
+  border: 1px solid #d8e0dd;
+  border-radius: var(--btn-radius);
+  background: #ffffff;
+  color: #17221f;
+  outline: 0;
+}
+
 .search {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-width: min(360px, 100%);
-  min-height: 40px;
-  padding: 0 12px;
+  width: 100%;
+  min-width: 0;
+  min-height: var(--btn-height-sm);
+  height: var(--btn-height-sm);
+  padding: 0 10px;
   border: 1px solid #d9e1de;
-  border-radius: 8px;
+  border-radius: var(--btn-radius);
   background: #ffffff;
+}
+
+.search svg {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  color: #64736e;
 }
 
 .search input {
@@ -1411,6 +1475,19 @@ nav {
   min-width: 0;
   border: 0;
   outline: 0;
+  background: transparent;
+  color: #17221f;
+}
+
+.filterBar .search {
+  min-height: var(--btn-height-sm);
+  height: var(--btn-height-sm);
+}
+
+@media (min-width: 720px) {
+  .filterField--search {
+    grid-column: span 2;
+  }
 }
 
 .atomList,
@@ -1732,37 +1809,6 @@ nav {
 
 .libraryResults {
   grid-row: span 3;
-}
-
-.filterGrid {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(130px, 1fr));
-  gap: 10px;
-  margin-top: 12px;
-}
-
-.filterGrid label {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  color: #34443f;
-  font-size: 13px;
-  font-weight: 650;
-}
-
-.filterGrid select {
-  grid-column: 1 / -1;
-  width: 100%;
-  min-width: 0;
-  height: 38px;
-  padding: 0 9px;
-  border: 1px solid #d8e0dd;
-  border-radius: 8px;
-  background: #ffffff;
-  color: #17221f;
-  outline: 0;
 }
 
 .libraryToolbar {
@@ -2130,8 +2176,12 @@ nav {
     grid-template-columns: 1fr;
   }
 
-  .filterGrid {
+  .filterBar {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .filterField--search {
+    grid-column: 1 / -1;
   }
 
   .metricGrid {
@@ -2183,7 +2233,7 @@ nav {
     flex: 1 1 120px;
   }
 
-  .filterGrid {
+  .filterBar {
     grid-template-columns: 1fr;
   }
 

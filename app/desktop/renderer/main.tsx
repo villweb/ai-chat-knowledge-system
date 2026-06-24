@@ -2199,14 +2199,32 @@ function LibraryPanel({
             <span>全部 {atoms.length}</span>
             {knowledge.facets.statuses.map((item) => <span key={item.value}>{item.value} {item.count}</span>)}
           </div>
-          <label className="search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索标题、正文、证据、标签" /></label>
         </div>
-        <div className="filterGrid">
-          <label><Filter size={15} />来源<select value={sourceApp} onChange={(event) => setSourceApp(event.target.value)}><option value="">全部</option>{knowledge.facets.source_apps.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select></label>
-          <label><Filter size={15} />类型<select value={type} onChange={(event) => setType(event.target.value)}><option value="">全部</option>{knowledge.facets.types.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select></label>
-          <label><Filter size={15} />项目<select value={project} onChange={(event) => setProject(event.target.value)}><option value="">全部</option>{knowledge.facets.projects.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select></label>
-          <label><Filter size={15} />标签<select value={tag} onChange={(event) => setTag(event.target.value)}><option value="">全部</option>{knowledge.facets.tags.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select></label>
-          <label><Filter size={15} />状态<select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">全部</option>{knowledge.facets.statuses.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select></label>
+        <div className="filterBar">
+          <label className="filterField filterField--wide filterField--search">
+            <span className="filterLabel">搜索</span>
+            <span className="search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索标题、正文、证据、标签" /></span>
+          </label>
+          <label className="filterField">
+            <span className="filterLabel"><Filter size={15} />来源</span>
+            <select value={sourceApp} onChange={(event) => setSourceApp(event.target.value)}><option value="">全部</option>{knowledge.facets.source_apps.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select>
+          </label>
+          <label className="filterField">
+            <span className="filterLabel"><Filter size={15} />类型</span>
+            <select value={type} onChange={(event) => setType(event.target.value)}><option value="">全部</option>{knowledge.facets.types.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select>
+          </label>
+          <label className="filterField">
+            <span className="filterLabel"><Filter size={15} />项目</span>
+            <select value={project} onChange={(event) => setProject(event.target.value)}><option value="">全部</option>{knowledge.facets.projects.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select>
+          </label>
+          <label className="filterField">
+            <span className="filterLabel"><Filter size={15} />标签</span>
+            <select value={tag} onChange={(event) => setTag(event.target.value)}><option value="">全部</option>{knowledge.facets.tags.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select>
+          </label>
+          <label className="filterField">
+            <span className="filterLabel"><Filter size={15} />状态</span>
+            <select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">全部</option>{knowledge.facets.statuses.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select>
+          </label>
         </div>
         <div className="libraryToolbar">
           <button className="secondary" onClick={onExport} disabled={busy} title="将全部已批准知识导出为 Markdown 文件"><Download size={16} />导出 Markdown</button>
@@ -2626,7 +2644,12 @@ function PendingPanel({
             </button>
           </div>
         )}
-        <label className="search"><Search size={16} /><input value={query} onChange={(event) => onQuery(event.target.value)} placeholder="搜索标题、正文、证据" /></label>
+      </div>
+      <div className="filterBar">
+        <label className="filterField filterField--wide">
+          <span className="filterLabel">搜索</span>
+          <span className="search"><Search size={16} /><input value={query} onChange={(event) => onQuery(event.target.value)} placeholder="搜索标题、正文、证据" /></span>
+        </label>
       </div>
       <div className="atomList">
         {filteredAtoms.map((item) => (
