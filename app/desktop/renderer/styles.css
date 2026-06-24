@@ -927,26 +927,18 @@ nav {
   flex: 1;
 }
 
-/* 导入主 CTA：覆盖共用基础里的 secondary 透明底，使用 primary 深绿 */
+/* 工作区主 CTA：覆盖共用基础里的透明底，使用 primary 深绿 */
+.actions button.primary,
+.privacyActions button.primary,
 .importCtaRow .importCta.primary {
   background: var(--btn-primary-bg);
   color: var(--btn-primary-text);
   border-color: var(--btn-primary-bg);
 }
 
+.actions button.primary:hover:not(:disabled),
+.privacyActions button.primary:hover:not(:disabled),
 .importCtaRow .importCta.primary:hover:not(:disabled) {
-  background: #2d8a63;
-  border-color: #2d8a63;
-}
-
-/* 引导页等 .actions 内主 CTA：覆盖共用基础里的透明底，使用 primary 深绿 */
-.actions button.primary {
-  background: var(--btn-primary-bg);
-  color: var(--btn-primary-text);
-  border-color: var(--btn-primary-bg);
-}
-
-.actions button.primary:hover:not(:disabled) {
   background: #2d8a63;
   border-color: #2d8a63;
 }
