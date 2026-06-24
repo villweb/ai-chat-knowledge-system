@@ -927,6 +927,18 @@ nav {
   flex: 1;
 }
 
+/* 导入主 CTA：覆盖共用基础里的 secondary 透明底，使用 primary 深绿 */
+.importCtaRow .importCta.primary {
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-text);
+  border-color: var(--btn-primary-bg);
+}
+
+.importCtaRow .importCta.primary:hover:not(:disabled) {
+  background: #2d8a63;
+  border-color: #2d8a63;
+}
+
 .hint {
   margin-top: 12px;
 }
