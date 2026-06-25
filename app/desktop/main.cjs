@@ -375,11 +375,21 @@ function registerIpc() {
         "--source-app",
         state.sourceApp,
         "--vault-root",
-        state.vaultRoot
+        state.vaultRoot,
+        "--default-sensitivity-missing",
+        "personal"
       ]);
       if (!result.ok) {
         pushEvent("p1_import", result.stderr);
         throw new Error(result.stderr || "导入和标准化失败。");
+      }
+      const importSummary = parseScriptStdout(result);
+      if (importSummary?.failed_file_count > 0) {
+        const preview = importSummary.failures
+          ?.slice(0, 3)
+          .map((failure) => `${failure.raw_path}: ${failure.error_message}`)
+          .join("；");
+        throw new Error(`标准化完成但有 ${importSummary.failed_file_count} 个文件失败。${preview ? ` ${preview}` : ""}`);
       }
       const atoms = await listAtoms();
       const pendingCount = atoms.filter((item) => item.atom.review_status === "pending").length;
