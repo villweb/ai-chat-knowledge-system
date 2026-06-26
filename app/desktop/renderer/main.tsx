@@ -2060,7 +2060,7 @@ function ImportPanel({
   }
 
   return (
-    <div className="grid two">
+    <div className="importLayout">
       <section className="panel">
         <FirstTimeBanner section="import">
           <strong>第一步：导入你的对话或随笔文件</strong>

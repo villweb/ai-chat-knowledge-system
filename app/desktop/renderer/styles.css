@@ -1224,6 +1224,20 @@ nav {
   grid-template-columns: minmax(280px, 0.8fr) minmax(360px, 1.2fr);
 }
 
+.importLayout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
+.importLayout > .panel {
+  width: 100%;
+}
+
+.importLayout .runAdvanced {
+  max-width: none;
+}
+
 .panel {
   min-width: 0;
   padding: 18px;
