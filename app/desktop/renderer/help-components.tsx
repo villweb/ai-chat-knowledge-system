@@ -3,7 +3,7 @@ import { X } from "lucide-react";
 
 const DISMISS_PREFIX = "ai_kb_dismissed_hints.";
 
-export type HintSection = "import" | "pending" | "library" | "run" | "settings" | "sources" | "privacy" | "commercial";
+export type HintSection = "import" | "pending" | "library" | "ask" | "run" | "settings" | "sources" | "privacy" | "commercial";
 
 export function isHintDismissed(section: HintSection): boolean {
   try {

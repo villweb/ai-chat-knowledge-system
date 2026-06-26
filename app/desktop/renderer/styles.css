@@ -848,6 +848,33 @@ nav {
   margin-top: 4px;
 }
 
+.externalAiBoundary,
+.privacyBoundaryCard {
+  display: grid;
+  gap: 6px;
+  padding: 11px 12px;
+  border: 1px solid #e8d7a6;
+  border-radius: 8px;
+  background: #fffaf0;
+}
+
+.externalAiBoundary {
+  margin: 12px 0;
+}
+
+.externalAiBoundary strong,
+.privacyBoundaryCard strong {
+  color: #3d3214;
+  font-size: 13px;
+}
+
+.externalAiBoundary span,
+.privacyBoundaryCard span {
+  color: #5f5430;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .checkList .checkWarn {
   color: #8a6d1f;
 }
@@ -1806,6 +1833,98 @@ nav {
   gap: 16px;
 }
 
+.askLayout {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.9fr) minmax(320px, 1.1fr);
+  gap: 16px;
+}
+
+.askLayout .panel {
+  min-width: 0;
+}
+
+.askQuestionField textarea {
+  min-height: 128px;
+}
+
+.askAnswerPanel {
+  display: grid;
+  align-content: start;
+}
+
+.askAnswerCard {
+  display: grid;
+  gap: 9px;
+  padding: 14px;
+  border: 1px solid #b9dcc4;
+  border-radius: 8px;
+  background: #f4fbf6;
+}
+
+.askAnswerCard strong {
+  color: #1d4f38;
+}
+
+.askAnswerCard p,
+.askAnswerCard small {
+  margin: 0;
+  color: #3d4d48;
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.askAnswerCard small {
+  color: #64736e;
+}
+
+.askCitationPanel {
+  grid-column: 1 / -1;
+}
+
+.citationList {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.citationCard {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #dce3e0;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #17221f;
+  text-align: left;
+}
+
+.citationCard:hover {
+  border-color: #8fbea3;
+  background: #f4fbf6;
+}
+
+.citationCard span {
+  color: #23724f;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.citationCard strong,
+.citationCard p,
+.citationCard small {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.citationCard p,
+.citationCard small {
+  color: #64736e;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .libraryLayout .panel {
   min-width: 0;
 }
@@ -1891,6 +2010,12 @@ nav {
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 14px;
+}
+
+.privacyBoundaryGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
 }
 
 .secureState,
@@ -2184,14 +2309,16 @@ nav {
     margin-top: 0;
   }
 
-  .grid.two,
-  .grid.twoWide,
-  .libraryLayout,
-  .privacyLayout,
-  .commercialLayout,
-  .formGrid {
-    grid-template-columns: 1fr;
-  }
+	  .grid.two,
+	  .grid.twoWide,
+	  .libraryLayout,
+	  .askLayout,
+	  .privacyLayout,
+	  .commercialLayout,
+	  .privacyBoundaryGrid,
+	  .formGrid {
+	    grid-template-columns: 1fr;
+	  }
 
   .filterBar {
     grid-template-columns: repeat(2, minmax(0, 1fr));

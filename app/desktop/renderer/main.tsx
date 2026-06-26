@@ -46,7 +46,7 @@ import { FieldLabel, FirstTimeBanner, HelpTip, HintText, SectionHeading } from "
 
 type ReviewStatus = "pending" | "approved" | "rejected" | "merged";
 type KnowledgeAtomType = "观点" | "方法" | "决策" | "经验" | "素材" | "问题" | "偏好";
-type NavKey = "guide" | "sources" | "import" | "run" | "library" | "privacy" | "commercial" | "pending" | "detail" | "settings" | "logs";
+type NavKey = "guide" | "sources" | "import" | "run" | "library" | "ask" | "privacy" | "commercial" | "pending" | "detail" | "settings" | "logs";
 type SourceConnectorStatus = "available" | "reserved";
 type PipelinePhase = "idle" | "importing" | "processing" | "waiting_review" | "done" | "failed";
 type PipelineSubstep = "copying" | "normalizing" | "extracting" | null;
@@ -393,6 +393,7 @@ const primaryNavItems: Array<{ key: NavKey; label: string; icon: React.Component
   { key: "import", label: "导入", icon: FileInput },
   { key: "pending", label: "待确认", icon: ListChecks },
   { key: "library", label: "知识库", icon: BookOpenCheck },
+  { key: "ask", label: "提问", icon: Search },
   { key: "run", label: "运行", icon: Play },
   { key: "detail", label: "详情", icon: SquarePen }
 ];
@@ -1479,6 +1480,15 @@ function App() {
             }}
           />
         )}
+        {active === "ask" && (
+          <AskPanel
+            atoms={state.atoms}
+            busy={busy}
+            onSelect={(atomId) => { setSelectedId(atomId); setActive("detail"); }}
+            onGoImport={() => setActive("import")}
+            onGoLibrary={() => goToLibrary()}
+          />
+        )}
         {active === "privacy" && (
           <PrivacyPanel
             privacy={state.privacy}
@@ -1492,8 +1502,8 @@ function App() {
               }
             }}
             onDeleteSource={(sourceApp) => {
-              if (confirmDestructive(`删除来源数据会移除 ${sourceApp} 的导入文件和归档原始记录。确认继续？`)) {
-                void withBusy(() => getDesktopApi().deleteSourceData({ source_app: sourceApp }), "来源数据已删除");
+              if (confirmDestructive(`删除来源原始文件会移除 ${sourceApp} 的导入文件和归档原始记录，不会删除已生成的知识库条目、运行历史或导出文件。确认继续？`)) {
+                void withBusy(() => getDesktopApi().deleteSourceData({ source_app: sourceApp }), "来源原始文件已删除");
               }
             }}
             onExportUserData={() => withBusy(() => getDesktopApi().exportUserData(), "用户数据导出完成")}
@@ -1842,7 +1852,7 @@ function ImportPanel({
         ) : (
           <div className="importAiNotice ok">
             <strong>已启用真实 AI API</strong>
-            <span>P2 提炼将调用已配置的 OpenAI 兼容接口（如 DeepSeek）。</span>
+            <span>P2 提炼会调用已配置的 OpenAI 兼容接口（如 DeepSeek），仅发送脱敏、截断后的 personal 记录摘录；private/confidential 记录默认不发送。</span>
           </div>
         )}
         <div className="formGrid importSourceGrid">
@@ -2303,6 +2313,116 @@ function LibraryPanel({
   );
 }
 
+function AskPanel({
+  atoms,
+  busy,
+  onSelect,
+  onGoImport,
+  onGoLibrary
+}: {
+  atoms: KnowledgeAtomDocument[];
+  busy: boolean;
+  onSelect: (atomId: string) => void;
+  onGoImport: () => void;
+  onGoLibrary: () => void;
+}) {
+  const [question, setQuestion] = useState("");
+  const [submittedQuestion, setSubmittedQuestion] = useState("");
+  const approvedAtoms = useMemo(() => atoms.filter((item) => item.atom.review_status === "approved"), [atoms]);
+  const answerItems = useMemo(() => {
+    return buildLocalAnswerItems(approvedAtoms, submittedQuestion).slice(0, 5);
+  }, [approvedAtoms, submittedQuestion]);
+  const hasQuestion = submittedQuestion.trim().length > 0;
+
+  function submitQuestion() {
+    setSubmittedQuestion(question.trim());
+  }
+
+  return (
+    <div className="askLayout">
+      <section className="panel">
+        <FirstTimeBanner section="ask">
+          <strong>提问：只基于已批准知识回答</strong>
+          当前先提供本地检索式回答，不调用外部 AI。回答必须带引用，避免没有来源的结论。
+        </FirstTimeBanner>
+        <SectionHeading
+          title="向知识库提问"
+          hint="输入问题后，只检索已批准知识，并展示引用来源。待确认、已拒绝和已合并内容不会进入默认回答。"
+          help="二期首版先做可验证的本地回答；后续可接入真实 AI 生成，但仍必须保留引用。"
+        />
+        <label className="fullField askQuestionField">
+          问题
+          <textarea
+            value={question}
+            onChange={(event) => setQuestion(event.target.value)}
+            placeholder="例如：我最近关于个人知识库产品的核心判断是什么？"
+          />
+        </label>
+        <div className="actions runActions">
+          <button className="primary" onClick={submitQuestion} disabled={busy || !question.trim()} title="基于已批准知识生成本地检索式回答">
+            <Search size={16} />
+            <span>基于知识库回答</span>
+          </button>
+          <button className="secondary" onClick={onGoLibrary} disabled={busy} title="前往知识库搜索和筛选">
+            <BookOpenCheck size={16} />
+            <span>去知识库</span>
+          </button>
+        </div>
+      </section>
+
+      <section className="panel askAnswerPanel">
+        <h2>回答</h2>
+        {approvedAtoms.length === 0 ? (
+          <div className="emptyState">
+            <p>当前没有已批准知识，暂时无法回答。</p>
+            <p className="muted">先导入文件并在「待确认」批准知识后，再回来提问。</p>
+            <div className="actions">
+              <button className="primary" onClick={onGoImport}><FileInput size={16} />去导入</button>
+            </div>
+          </div>
+        ) : !hasQuestion ? (
+          <div className="emptyState">
+            <p>输入问题后，这里会显示本地检索式回答和引用来源。</p>
+            <p className="muted">当前已批准知识 {approvedAtoms.length} 条。</p>
+          </div>
+        ) : answerItems.length === 0 ? (
+          <div className="emptyState">
+            <p>没有从已批准知识中找到足够相关的内容。</p>
+            <p className="muted">可以换一个关键词，或先去知识库确认是否已有相关知识。</p>
+            <div className="actions">
+              <button className="secondary" onClick={onGoLibrary}><BookOpenCheck size={16} />去知识库</button>
+            </div>
+          </div>
+        ) : (
+          <div className="askAnswerCard">
+            <strong>基于已批准知识，找到 {answerItems.length} 条可引用内容</strong>
+            <p>
+              {answerItems.map((item) => item.atom.content).join(" ")}
+            </p>
+            <small>这是本地检索式回答，不调用外部 AI；请以引用来源为准。</small>
+          </div>
+        )}
+      </section>
+
+      {answerItems.length > 0 && (
+        <section className="panel askCitationPanel">
+          <h2>引用来源</h2>
+          <div className="citationList">
+            {answerItems.map((item, index) => (
+              <button className="citationCard" key={item.atom.atom_id} onClick={() => onSelect(item.atom.atom_id)}>
+                <span>引用 {index + 1}</span>
+                <strong>{item.atom.title}</strong>
+                <p>{item.atom.evidence || item.atom.content}</p>
+                <small>{item.atom.source_app} · {item.atom.source_raw_paths.join(", ") || "无原始路径"}</small>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
 function PrivacyPanel({
   privacy,
   connectors,
@@ -2362,7 +2482,26 @@ function PrivacyPanel({
           <button className="secondary" onClick={onApplyRetention} disabled={busy} title="按当前保留策略清理过期原始文件"><Trash2 size={16} />执行保留策略</button>
           <button className="secondary" onClick={onWriteLegalDrafts} disabled={busy} title="在本地生成隐私政策和用户协议草案"><FileText size={16} />生成协议草案</button>
         </div>
-        <div className="secureState"><KeyRound size={16} /><span>API Key：{privacy.secure_credentials.openai_compatible_saved ? `已加密保存 ${privacy.secure_credentials.updated_at ?? ""}` : "未保存到本地"}</span></div>
+        <div className="secureState">
+          <KeyRound size={16} />
+          <span>
+            API Key：{privacy.secure_credentials.openai_compatible_saved ? `已加密保存 ${privacy.secure_credentials.updated_at ?? ""}` : "未保存到本地"}。当前为本地文件加密，尚未接入 macOS Keychain 或 Windows Credential Manager。
+          </span>
+        </div>
+      </section>
+
+      <section className="panel">
+        <h2>本地和外部处理边界</h2>
+        <div className="privacyBoundaryGrid">
+          <div className="privacyBoundaryCard">
+            <strong>始终本地处理</strong>
+            <span>原始文件归档、SQLite 索引、运行日志、知识库 Markdown、敏感内容扫描和审查状态。</span>
+          </div>
+          <div className="privacyBoundaryCard">
+            <strong>真实 AI 模式会外发</strong>
+            <span>仅发送脱敏、截断后的 personal 记录摘录，用于候选知识提炼；private/confidential 记录默认阻断。</span>
+          </div>
+        </div>
       </section>
 
       <section className="panel">
@@ -2376,14 +2515,15 @@ function PrivacyPanel({
 
       <section className="panel">
         <h2>来源授权说明</h2>
-        <div className="sourceAuthList">{privacy.sources.map((source) => <div className="sourceAuthRow" key={source.source_app}><strong>{source.display_name} · {source.authorized ? "已授权" : "未授权"}</strong><span>{source.permission_scope}</span><small>读取：{source.reads.join("；")}</small><small>不读取：{source.does_not_read.join("；")}</small></div>)}</div>
+        <div className="sourceAuthList">{privacy.sources.map((source) => <div className="sourceAuthRow" key={source.source_app}><strong>{source.display_name} · {source.status === "reserved" ? "预留不可用" : (source.authorized ? "当前已启用" : "当前已停用")}</strong><span>{source.permission_scope}</span><small>读取：{source.reads.join("；")}</small><small>不读取：{source.does_not_read.join("；")}</small></div>)}</div>
       </section>
 
       <section className="panel">
         <h2>用户数据</h2>
-        <div className="formGrid"><label>删除来源<select value={sourceToDelete} onChange={(event) => setSourceToDelete(event.target.value)}>{connectors.map((connector) => <option key={connector.source_app} value={connector.source_app}>{connector.display_name}</option>)}</select></label></div>
+        <p className="muted">删除来源原始文件只会移除该来源的导入文件和原始归档，不会删除已经批准进知识库的派生知识。</p>
+        <div className="formGrid"><label>删除来源原始文件<select value={sourceToDelete} onChange={(event) => setSourceToDelete(event.target.value)}>{connectors.map((connector) => <option key={connector.source_app} value={connector.source_app}>{connector.display_name}</option>)}</select></label></div>
         <div className="privacyActions">
-          <button className="danger" onClick={() => onDeleteSource(sourceToDelete)} disabled={busy}><Trash2 size={16} />删除来源数据</button>
+          <button className="danger" onClick={() => onDeleteSource(sourceToDelete)} disabled={busy}><Trash2 size={16} />删除来源原始文件</button>
           <button className="secondary" onClick={onExportUserData} disabled={busy}><Download size={16} />导出用户数据</button>
           <button className="danger" onClick={onDeleteAllUserData} disabled={busy}><Trash2 size={16} />彻底删除本地数据</button>
         </div>
@@ -2855,6 +2995,25 @@ function SettingsPanel({
     }
   }
 
+  function handleSave() {
+    if (showRealAiFields && state.aiProvider !== "openai-compatible") {
+      const confirmed = window.confirm(
+        "启用真实 AI 后，系统会把脱敏、截断后的 personal 记录摘录发送到你配置的外部 AI 服务。private/confidential 记录默认不会发送。确认继续？"
+      );
+      if (!confirmed) {
+        return;
+      }
+    }
+    onSave({
+      sourceApp,
+      aiProvider,
+      aiProviderPreset: presetId,
+      baseUrl: showRealAiFields ? baseUrl : "",
+      model: showRealAiFields ? model : "",
+      apiKey
+    });
+  }
+
   return (
     <div className="grid two">
       <section className="panel settingsPanel">
@@ -2871,6 +3030,13 @@ function SettingsPanel({
           <div className="importAiNotice warning">
             <strong>当前为本地测试模式（fixture）</strong>
             <span>不消耗 API 额度，提炼结果为本地模板。切换下方「AI 服务商」为 DeepSeek 等常见服务并填写 API Key 后可启用真实调用。</span>
+          </div>
+        )}
+        {showRealAiFields && (
+          <div className="externalAiBoundary">
+            <strong>真实 AI 调用边界</strong>
+            <span>会发送：topic、project、user_excerpt、ai_excerpt、context_summary 的脱敏截断内容。</span>
+            <span>不会发送：API Key 原文、被规则阻断的 private/confidential 记录、大段完整原始文件。</span>
           </div>
         )}
         <div className="formGrid">
@@ -2926,19 +3092,12 @@ function SettingsPanel({
           )}
         </div>
         <div className="actions runActions">
-        <button
-          className="primary"
-          onClick={() => onSave({
-            sourceApp,
-            aiProvider,
-            aiProviderPreset: presetId,
-            baseUrl: showRealAiFields ? baseUrl : "",
-            model: showRealAiFields ? model : "",
-            apiKey
-          })}
-          disabled={busy}
-          title="保存来源、AI 服务和 API 配置"
-        >
+	        <button
+	          className="primary"
+	          onClick={handleSave}
+	          disabled={busy}
+	          title="保存来源、AI 服务和 API 配置"
+	        >
           <Shield size={16} />
           <span>保存会话配置</span>
         </button>
@@ -3018,6 +3177,7 @@ function subtitleFor(active: NavKey): string {
     import: "导入对话，AI 提炼候选后等你确认",
     run: "批量处理已放入导入目录的文件，或按日程自动沉淀",
     library: "已批准知识可搜索、导出、同步 Obsidian",
+    ask: "只基于已批准知识回答，并展示引用来源",
     privacy: "来源授权、敏感识别、数据导出和删除",
     commercial: "试用、授权、购买、更新公告和反馈",
     pending: "审查 AI 候选，确认后才进入正式库",
@@ -3026,6 +3186,44 @@ function subtitleFor(active: NavKey): string {
     logs: "运行事件和错误摘要"
   };
   return subtitles[active];
+}
+
+function buildLocalAnswerItems(items: KnowledgeAtomDocument[], question: string): KnowledgeAtomDocument[] {
+  const normalizedQuestion = question.trim().toLowerCase();
+  if (!normalizedQuestion) {
+    return [];
+  }
+
+  const terms = Array.from(new Set([
+    normalizedQuestion,
+    ...normalizedQuestion.split(/\s+/).filter((item) => item.length >= 2)
+  ]));
+
+  return items
+    .map((item) => ({ item, score: scoreKnowledgeAtomForQuestion(item, terms) }))
+    .filter((entry) => entry.score > 0)
+    .sort((left, right) => right.score - left.score || right.item.atom.updated_at.localeCompare(left.item.atom.updated_at))
+    .map((entry) => entry.item);
+}
+
+function scoreKnowledgeAtomForQuestion(item: KnowledgeAtomDocument, terms: string[]): number {
+  const searchable = [
+    item.atom.title,
+    item.atom.content,
+    item.atom.evidence,
+    item.atom.project,
+    item.atom.source_app,
+    item.atom.type,
+    item.atom.tags.join(" "),
+    item.atom.source_raw_paths.join(" ")
+  ].join(" ").toLowerCase();
+  let score = 0;
+  for (const term of terms) {
+    if (searchable.includes(term)) {
+      score += term.length === 1 ? 1 : term.length;
+    }
+  }
+  return score;
 }
 
 function filterKnowledgeItems(
