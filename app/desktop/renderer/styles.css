@@ -1910,16 +1910,19 @@ nav {
 
 .libraryLayout {
   display: grid;
-  grid-template-columns: minmax(320px, 1.15fr) minmax(280px, 0.85fr);
+  grid-template-columns: 1fr;
   gap: 16px;
+  align-items: stretch;
 }
 
 .askLayout {
   display: grid;
-  grid-template-columns: minmax(320px, 0.9fr) minmax(320px, 1.1fr);
+  grid-template-columns: 1fr;
   gap: 16px;
+  align-items: stretch;
 }
 
+.libraryLayout > .panel,
 .askLayout .panel {
   min-width: 0;
 }
@@ -2030,14 +2033,6 @@ nav {
   color: #64736e;
   font-size: 13px;
   line-height: 1.5;
-}
-
-.libraryLayout .panel {
-  min-width: 0;
-}
-
-.libraryResults {
-  grid-row: span 3;
 }
 
 .libraryToolbar {
