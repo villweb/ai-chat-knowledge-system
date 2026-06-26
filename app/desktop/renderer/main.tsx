@@ -1466,7 +1466,7 @@ function App() {
           {bootError && (
             <>
               <p>{bootError}</p>
-              <button className="primary" onClick={() => void refresh()}>重试</button>
+              <button className="primary" onClick={() => void refresh()}><RefreshCw size={16} />重试</button>
             </>
           )}
         </div>
@@ -1777,7 +1777,7 @@ function ReviewUndoBanner({
       <PackageCheck size={18} />
       <span>审查状态已变更。原状态为「{reviewStatusLabel(status)}」，可撤销本次操作。</span>
       <div className="reviewSuccessActions">
-        <button className="secondary" onClick={onUndo} title="恢复到上一次审查状态">撤销</button>
+        <button className="secondary" onClick={onUndo} title="恢复到上一次审查状态"><RefreshCw size={16} />撤销</button>
         <button className="iconOnly" onClick={onDismiss} title="关闭"><X size={16} /></button>
       </div>
     </div>

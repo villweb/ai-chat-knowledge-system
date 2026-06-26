@@ -18,19 +18,27 @@
   --btn-weight: 650;
   --btn-primary-bg: #23724f;
   --btn-primary-hover: #185d3e;
+  --btn-primary-active: #144b33;
   --btn-primary-text: #ffffff;
   --btn-primary-soft-bg: #2d8a63;
   --btn-primary-soft-hover: #3a9d75;
+  --btn-primary-soft-active: #23724f;
   --btn-primary-soft-text: #ffffff;
   --btn-secondary-bg: #ffffff;
   --btn-secondary-border: #d7dfdc;
   --btn-secondary-text: #17221f;
   --btn-secondary-hover: #f2f7f4;
+  --btn-secondary-active: #e7f0eb;
   --btn-danger-bg: #ffffff;
   --btn-danger-border: #e5b4b4;
   --btn-danger-text: #8a2f25;
   --btn-danger-hover: #fff5f5;
+  --btn-danger-active: #ffe7e7;
   --btn-ghost-hover: #eef2f0;
+  --btn-ghost-active: #e2ece7;
+  --btn-disabled-bg: #e8efeb;
+  --btn-disabled-border: #cbd8d2;
+  --btn-disabled-text: #6b7974;
 }
 
 * {
@@ -58,7 +66,7 @@ button {
 
 button:disabled {
   cursor: not-allowed;
-  opacity: 0.58;
+  opacity: 1;
 }
 
 .boot {
@@ -235,6 +243,11 @@ nav {
   color: #ffffff;
 }
 
+.nav:active:not(:disabled) {
+  background: #2f413c;
+  color: #ffffff;
+}
+
 .nav.active {
   box-shadow: inset 3px 0 0 #7fd15a;
 }
@@ -311,6 +324,18 @@ nav {
 
 .iconOnly:hover:not(:disabled) {
   background: var(--btn-secondary-hover);
+}
+
+.iconOnly:active:not(:disabled) {
+  background: var(--btn-secondary-active);
+  border-color: #c5d5ce;
+}
+
+.iconOnly:disabled,
+.iconText:disabled {
+  background: var(--btn-disabled-bg);
+  color: var(--btn-disabled-text);
+  border-color: var(--btn-disabled-border);
 }
 
 .firstTimeBannerClose {
@@ -401,6 +426,20 @@ nav {
   color: var(--btn-danger-text);
   font-size: 12px;
   font-weight: var(--btn-weight);
+}
+
+.pipelineRetry:hover:not(:disabled) {
+  background: var(--btn-danger-hover);
+}
+
+.pipelineRetry:active:not(:disabled) {
+  background: var(--btn-danger-active);
+}
+
+.pipelineRetry:disabled {
+  background: var(--btn-disabled-bg);
+  color: var(--btn-disabled-text);
+  border-color: var(--btn-disabled-border);
 }
 
 .pipelineRetry svg {
@@ -552,6 +591,17 @@ nav {
   border-color: var(--btn-primary-hover);
 }
 
+.primary:active:not(:disabled) {
+  background: var(--btn-primary-active);
+  border-color: var(--btn-primary-active);
+}
+
+.primary:disabled {
+  background: var(--btn-disabled-bg);
+  color: var(--btn-disabled-text);
+  border-color: var(--btn-disabled-border);
+}
+
 /* 浅主操作：测试模式横幅「去设置」等，比标准 primary 略浅 */
 .primarySoft {
   background: var(--btn-primary-soft-bg);
@@ -562,6 +612,17 @@ nav {
 .primarySoft:hover:not(:disabled) {
   background: var(--btn-primary-soft-hover);
   border-color: var(--btn-primary-soft-hover);
+}
+
+.primarySoft:active:not(:disabled) {
+  background: var(--btn-primary-soft-active);
+  border-color: var(--btn-primary-soft-active);
+}
+
+.primarySoft:disabled {
+  background: var(--btn-disabled-bg);
+  color: var(--btn-disabled-text);
+  border-color: var(--btn-disabled-border);
 }
 
 /* 次要操作：导航、导出、取消等 */
@@ -597,6 +658,39 @@ nav {
   background: var(--btn-secondary-hover);
 }
 
+.secondary:active:not(:disabled),
+.actions button:not(.primary):not(.primarySoft):not(.danger):active:not(:disabled),
+.importFlowLinks button:active:not(:disabled),
+.libraryToolbar button:active:not(:disabled),
+.privacyActions button:not(.primary):not(.primarySoft):not(.danger):active:not(:disabled),
+.duplicateRow button:active:not(:disabled),
+.runResultLinks button:active:not(:disabled),
+.reviewSuccessActions > button:not(.iconOnly):not(.primary):not(.primarySoft):not(.danger):active:not(:disabled),
+.commercialActions button:not(.primary):not(.primarySoft):not(.danger):active:not(:disabled),
+.libraryRecentBar button:active:not(:disabled),
+.importPipelineProgress button:not(.primary):not(.primarySoft):active:not(:disabled),
+.atomInlineActions button:not(.primary):not(.primarySoft):not(.danger):active:not(:disabled) {
+  background: var(--btn-secondary-active);
+  border-color: #c5d5ce;
+}
+
+.secondary:disabled,
+.actions button:not(.primary):not(.primarySoft):not(.danger):disabled,
+.importFlowLinks button:disabled,
+.libraryToolbar button:disabled,
+.privacyActions button:not(.primary):not(.primarySoft):not(.danger):disabled,
+.duplicateRow button:disabled,
+.runResultLinks button:disabled,
+.reviewSuccessActions > button:not(.iconOnly):not(.primary):not(.primarySoft):not(.danger):disabled,
+.commercialActions button:not(.primary):not(.primarySoft):not(.danger):disabled,
+.libraryRecentBar button:disabled,
+.importPipelineProgress button:not(.primary):not(.primarySoft):disabled,
+.atomInlineActions button:not(.primary):not(.primarySoft):not(.danger):disabled {
+  background: var(--btn-disabled-bg);
+  color: var(--btn-disabled-text);
+  border-color: var(--btn-disabled-border);
+}
+
 /* 危险操作：拒绝、删除等 */
 .danger {
   background: var(--btn-danger-bg);
@@ -606,6 +700,16 @@ nav {
 
 .danger:hover:not(:disabled) {
   background: var(--btn-danger-hover);
+}
+
+.danger:active:not(:disabled) {
+  background: var(--btn-danger-active);
+}
+
+.danger:disabled {
+  background: var(--btn-disabled-bg);
+  color: var(--btn-disabled-text);
+  border-color: var(--btn-disabled-border);
 }
 
 /* 轻量操作：卡片内文字链式按钮 */
@@ -619,6 +723,16 @@ nav {
 
 .ghost:hover:not(:disabled) {
   background: var(--btn-ghost-hover);
+}
+
+.ghost:active:not(:disabled) {
+  background: var(--btn-ghost-active);
+}
+
+.ghost:disabled {
+  color: var(--btn-disabled-text);
+  background: transparent;
+  border-color: transparent;
 }
 
 .navBadge {
@@ -761,6 +875,19 @@ nav {
   font-size: inherit;
   text-decoration: underline;
   cursor: pointer;
+}
+
+.inlineLink:hover:not(:disabled) {
+  color: var(--btn-primary-hover);
+}
+
+.inlineLink:active:not(:disabled) {
+  color: var(--btn-primary-active);
+}
+
+.inlineLink:disabled {
+  color: var(--btn-disabled-text);
+  text-decoration-color: var(--btn-disabled-text);
 }
 
 .importFlowLinks {
@@ -1013,8 +1140,25 @@ nav {
 .actions button.primary:hover:not(:disabled),
 .privacyActions button.primary:hover:not(:disabled),
 .importCtaRow .importCta.primary:hover:not(:disabled) {
-  background: #2d8a63;
-  border-color: #2d8a63;
+  background: var(--btn-primary-hover);
+  border-color: var(--btn-primary-hover);
+}
+
+.settingsPanel .actions button.primary:active:not(:disabled),
+.actions button.primary:active:not(:disabled),
+.privacyActions button.primary:active:not(:disabled),
+.importCtaRow .importCta.primary:active:not(:disabled) {
+  background: var(--btn-primary-active);
+  border-color: var(--btn-primary-active);
+}
+
+.settingsPanel .actions button.primary:disabled,
+.actions button.primary:disabled,
+.privacyActions button.primary:disabled,
+.importCtaRow .importCta.primary:disabled {
+  background: var(--btn-disabled-bg);
+  color: var(--btn-disabled-text);
+  border-color: var(--btn-disabled-border);
 }
 
 /* 浅主 CTA：覆盖共用基础里的透明底 */
@@ -1027,6 +1171,17 @@ nav {
 .fixtureModeBanner > button.primarySoft:hover:not(:disabled) {
   background: var(--btn-primary-soft-hover);
   border-color: var(--btn-primary-soft-hover);
+}
+
+.fixtureModeBanner > button.primarySoft:active:not(:disabled) {
+  background: var(--btn-primary-soft-active);
+  border-color: var(--btn-primary-soft-active);
+}
+
+.fixtureModeBanner > button.primarySoft:disabled {
+  background: var(--btn-disabled-bg);
+  color: var(--btn-disabled-text);
+  border-color: var(--btn-disabled-border);
 }
 
 .hint {
@@ -1405,11 +1560,15 @@ nav {
 .statusPills button.statusPill {
   border: 1px solid transparent;
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
 .statusPills button.statusPill:hover {
   background: #e4ebe8;
+}
+
+.statusPills button.statusPill:active {
+  background: var(--btn-secondary-active);
+  border-color: #c5d5ce;
 }
 
 .statusPills button.statusPill.active {
@@ -1574,6 +1733,11 @@ nav {
 .atomRow.active {
   border-color: #8fbea3;
   background: #f4fbf6;
+}
+
+.atomRow:active {
+  border-color: #5f9f7d;
+  background: #eaf6ee;
 }
 
 .atomRow strong,
@@ -2015,6 +2179,11 @@ nav {
   background: #f4fbf6;
 }
 
+.citationCard:active {
+  border-color: #5f9f7d;
+  background: #eaf6ee;
+}
+
 .citationCard span {
   color: #23724f;
   font-size: 12px;
@@ -2423,22 +2592,32 @@ nav {
   background: var(--btn-secondary-hover);
 }
 
+.commercialLinkList a:active,
+.commercialActions a:active {
+  background: var(--btn-secondary-active);
+  border-color: #c5d5ce;
+}
+
 .commercialActions .feedbackSubmit {
-  background: #185d3e;
-  color: #ffffff;
-  border-color: #185d3e;
+  background: var(--btn-primary-hover);
+  color: var(--btn-primary-text);
+  border-color: var(--btn-primary-hover);
 }
 
 .commercialActions .feedbackSubmit:hover:not(:disabled) {
-  background: #23724f;
-  border-color: #23724f;
+  background: var(--btn-primary-bg);
+  border-color: var(--btn-primary-bg);
+}
+
+.commercialActions .feedbackSubmit:active:not(:disabled) {
+  background: var(--btn-primary-active);
+  border-color: var(--btn-primary-active);
 }
 
 .commercialActions .feedbackSubmit:disabled {
-  opacity: 1;
-  background: #e8efeb;
-  color: #6b7974;
-  border-color: #cbd8d2;
+  background: var(--btn-disabled-bg);
+  color: var(--btn-disabled-text);
+  border-color: var(--btn-disabled-border);
 }
 
 .commercialLinkList a svg,
