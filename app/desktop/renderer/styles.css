@@ -2349,6 +2349,32 @@ nav {
   margin-top: 14px;
 }
 
+.userDataActions button {
+  min-width: 168px;
+}
+
+.userDataActions .danger {
+  background: #fff5f5;
+  color: var(--btn-danger-text);
+  border-color: var(--btn-danger-border);
+}
+
+.userDataActions .danger:hover:not(:disabled) {
+  background: #ffecec;
+  border-color: #d98787;
+}
+
+.userDataActions .danger:active:not(:disabled) {
+  background: var(--btn-danger-active);
+  border-color: #c96f6f;
+}
+
+.userDataActions .danger:disabled {
+  background: var(--btn-disabled-bg);
+  color: var(--btn-disabled-text);
+  border-color: var(--btn-disabled-border);
+}
+
 .privacyBoundaryGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -2846,7 +2846,7 @@ function PrivacyPanel({
         <h2>用户数据</h2>
         <p className="muted">删除来源原始文件只会移除该来源的导入文件和原始归档，不会删除已经批准进知识库的派生知识。</p>
         <div className="formGrid"><label>删除来源原始文件<select value={sourceToDelete} onChange={(event) => setSourceToDelete(event.target.value)}>{connectors.map((connector) => <option key={connector.source_app} value={connector.source_app}>{connector.display_name}</option>)}</select></label></div>
-        <div className="privacyActions">
+        <div className="privacyActions userDataActions">
           <button className="danger" onClick={() => onDeleteSource(sourceToDelete)} disabled={busy}><Trash2 size={16} />删除来源原始文件</button>
           <button className="secondary" onClick={onExportUserData} disabled={busy}><Download size={16} />导出用户数据</button>
           <button className="danger" onClick={onDeleteAllUserData} disabled={busy}><Trash2 size={16} />彻底删除本地数据</button>
