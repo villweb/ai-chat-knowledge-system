@@ -2972,7 +2972,7 @@ function CommercialPanel({
         </div>
         <label className="fullField">内容<textarea value={feedbackMessage} onChange={(event) => setFeedbackMessage(event.target.value)} placeholder="写下问题、建议或购买相关反馈" /></label>
         <div className="commercialActions">
-          <button className="primary" onClick={() => onCreateFeedback({ category: feedbackCategory, contact_email: feedbackEmail, message: feedbackMessage })} disabled={busy || !feedbackMessage.trim()} title="在本地创建反馈草稿，可通过支持渠道发送"><FileText size={16} />创建反馈草稿</button>
+          <button className="primary feedbackSubmit" onClick={() => onCreateFeedback({ category: feedbackCategory, contact_email: feedbackEmail, message: feedbackMessage })} disabled={busy || !feedbackMessage.trim()} title="在本地创建反馈草稿，可通过支持渠道发送"><FileText size={16} />创建反馈草稿</button>
           <a href={commercial.feedback.feedback_url} target="_blank" rel="noreferrer"><Globe size={16} />在线支持</a>
         </div>
       </section>

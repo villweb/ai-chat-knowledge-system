@@ -2423,6 +2423,24 @@ nav {
   background: var(--btn-secondary-hover);
 }
 
+.commercialActions .feedbackSubmit {
+  background: #185d3e;
+  color: #ffffff;
+  border-color: #185d3e;
+}
+
+.commercialActions .feedbackSubmit:hover:not(:disabled) {
+  background: #23724f;
+  border-color: #23724f;
+}
+
+.commercialActions .feedbackSubmit:disabled {
+  opacity: 1;
+  background: #e8efeb;
+  color: #6b7974;
+  border-color: #cbd8d2;
+}
+
 .commercialLinkList a svg,
 .commercialActions a svg {
   flex-shrink: 0;
