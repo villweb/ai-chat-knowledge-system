@@ -1932,6 +1932,32 @@ nav {
   color: #1d4f38;
 }
 
+.answerPointList {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.answerPointList li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 8px 10px;
+  border: 1px solid #d9e7de;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.answerPointList span {
+  color: #23724f;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.6;
+}
+
 .askAnswerCard p,
 .askAnswerCard small {
   margin: 0;

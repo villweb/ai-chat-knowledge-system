@@ -411,20 +411,19 @@ const pipelineSubsteps = [
   { key: "extracting", label: "AI 提炼" }
 ] as const;
 
-// 主栏：高频操作（导入、确认、知识库、运行、详情）
+// 主栏：用户主路径，只保留最高频闭环入口
 const primaryNavItems: Array<{ key: NavKey; label: string; icon: React.ComponentType<{ size?: number }> }> = [
   { key: "import", label: "导入", icon: FileInput },
   { key: "pending", label: "待确认", icon: ListChecks },
   { key: "library", label: "知识库", icon: BookOpenCheck },
-  { key: "ask", label: "提问", icon: Search },
-  { key: "run", label: "运行", icon: Play },
-  { key: "detail", label: "详情", icon: SquarePen }
+  { key: "ask", label: "提问", icon: Search }
 ];
 
 // 更多：配置来源与低频管理
 const secondaryNavItems: Array<{ key: NavKey; label: string; icon: React.ComponentType<{ size?: number }> }> = [
   { key: "guide", label: "引导", icon: BookOpenCheck },
   { key: "sources", label: "来源", icon: Database },
+  { key: "run", label: "运行", icon: Play },
   { key: "privacy", label: "隐私", icon: Lock },
   { key: "settings", label: "设置", icon: Settings },
   { key: "logs", label: "日志", icon: Archive },
@@ -2613,7 +2612,7 @@ function AskPanel({
   const [submittedQuestion, setSubmittedQuestion] = useState("");
   const approvedAtoms = useMemo(() => atoms.filter((item) => item.atom.review_status === "approved"), [atoms]);
   const answerItems = useMemo(() => {
-    return buildLocalAnswerItems(approvedAtoms, submittedQuestion).slice(0, 5);
+    return buildLocalAnswerItems(approvedAtoms, submittedQuestion).slice(0, 4);
   }, [approvedAtoms, submittedQuestion]);
   const hasQuestion = submittedQuestion.trim().length > 0;
 
@@ -2679,9 +2678,14 @@ function AskPanel({
         ) : (
           <div className="askAnswerCard">
             <strong>基于已批准知识，找到 {answerItems.length} 条可引用内容</strong>
-            <p>
-              {answerItems.map((item) => item.atom.content).join(" ")}
-            </p>
+            <ul className="answerPointList">
+              {answerItems.map((item, index) => (
+                <li key={item.atom.atom_id}>
+                  <span>[{index + 1}]</span>
+                  <p>{truncateText(item.atom.content, 180)}</p>
+                </li>
+              ))}
+            </ul>
             <small>这是本地检索式回答，不调用外部 AI；请以引用来源为准。</small>
           </div>
         )}
@@ -2695,7 +2699,7 @@ function AskPanel({
               <button className="citationCard" key={item.atom.atom_id} onClick={() => onSelect(item.atom.atom_id)}>
                 <span>引用 {index + 1}</span>
                 <strong>{item.atom.title}</strong>
-                <p>{item.atom.evidence || item.atom.content}</p>
+                <p>{truncateText(item.atom.evidence || item.atom.content, 160)}</p>
                 <small>{item.atom.source_app} · {item.atom.source_raw_paths.join(", ") || "无原始路径"}</small>
               </button>
             ))}
@@ -3555,16 +3559,35 @@ function buildLocalAnswerItems(items: KnowledgeAtomDocument[], question: string)
     return [];
   }
 
-  const terms = Array.from(new Set([
-    normalizedQuestion,
-    ...normalizedQuestion.split(/\s+/).filter((item) => item.length >= 2)
-  ]));
+  const terms = buildQuestionTerms(normalizedQuestion);
 
   return items
     .map((item) => ({ item, score: scoreKnowledgeAtomForQuestion(item, terms) }))
     .filter((entry) => entry.score > 0)
     .sort((left, right) => right.score - left.score || right.item.atom.updated_at.localeCompare(left.item.atom.updated_at))
     .map((entry) => entry.item);
+}
+
+function buildQuestionTerms(normalizedQuestion: string): string[] {
+  const normalized = normalizedQuestion.replace(/[，。！？、,.!?;；:：]/g, " ").replace(/\s+/g, " ").trim();
+  const terms = new Set<string>();
+  if (normalized.length >= 2) {
+    terms.add(normalized);
+  }
+  for (const item of normalized.split(" ")) {
+    if (item.length >= 2) {
+      terms.add(item);
+    }
+    if (/[\u4e00-\u9fff]/.test(item) && item.length >= 4) {
+      for (let index = 0; index <= item.length - 2; index += 1) {
+        terms.add(item.slice(index, index + 2));
+      }
+      for (let index = 0; index <= item.length - 3; index += 1) {
+        terms.add(item.slice(index, index + 3));
+      }
+    }
+  }
+  return [...terms].slice(0, 48);
 }
 
 function scoreKnowledgeAtomForQuestion(item: KnowledgeAtomDocument, terms: string[]): number {
@@ -3585,6 +3608,14 @@ function scoreKnowledgeAtomForQuestion(item: KnowledgeAtomDocument, terms: strin
     }
   }
   return score;
+}
+
+function truncateText(value: string, maxLength: number): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxLength)}...`;
 }
 
 function buildResultPaths(items: Array<{ label: string; path: string | undefined }>): Array<{ label: string; path: string }> {
