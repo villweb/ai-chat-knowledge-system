@@ -36,9 +36,9 @@
   --btn-danger-active: #ffe7e7;
   --btn-ghost-hover: #eef2f0;
   --btn-ghost-active: #e2ece7;
-  --btn-disabled-bg: #e8efeb;
-  --btn-disabled-border: #cbd8d2;
-  --btn-disabled-text: #6b7974;
+  --btn-disabled-bg: #eceff1;
+  --btn-disabled-border: #d4d8dd;
+  --btn-disabled-text: #737a82;
 }
 
 * {
