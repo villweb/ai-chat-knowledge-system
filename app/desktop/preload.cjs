@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("desktopApi", {
   getState: () => ipcRenderer.invoke("app:get-state"),
   chooseVault: () => ipcRenderer.invoke("vault:choose"),
+  showVaultPath: (input) => ipcRenderer.invoke("vault:show-path", input),
   chooseImportFiles: (sourceApp) => ipcRenderer.invoke("import:choose-files", sourceApp),
   retryImport: () => ipcRenderer.invoke("import:retry"),
   runImport: () => ipcRenderer.invoke("workflow:run-import"),
@@ -29,6 +30,7 @@ contextBridge.exposeInMainWorld("desktopApi", {
   saveCommercialAccount: (input) => ipcRenderer.invoke("commercial:save-account", input),
   createFeedbackDraft: (input) => ipcRenderer.invoke("commercial:create-feedback", input),
   listLogs: () => ipcRenderer.invoke("logs:list"),
+  getSourceRecords: (input) => ipcRenderer.invoke("records:get", input),
   setConnectorEnabled: (input) => ipcRenderer.invoke("connectors:set-enabled", input),
   getAutomationState: () => ipcRenderer.invoke("automation:get-state"),
   saveAutomationSettings: (input) => ipcRenderer.invoke("automation:save-settings", input),

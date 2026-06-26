@@ -14,7 +14,7 @@ import {
 } from "../app/core";
 import type { SourceApp } from "../app/schemas";
 
-const { action, vaultRoot, sourceApp } = parseArgs(process.argv.slice(2));
+const { action, vaultRoot, sourceApp, deleteDerivedKnowledge } = parseArgs(process.argv.slice(2));
 
 if (action === "state") {
   console.log(JSON.stringify(await getPrivacySecurityState(vaultRoot), null, 2));
@@ -31,7 +31,7 @@ if (action === "state") {
   console.log(JSON.stringify(await applyRawRetentionPolicy(vaultRoot), null, 2));
 } else if (action === "delete-source") {
   if (!sourceApp) throw new Error("delete-source requires --source-app.");
-  console.log(JSON.stringify(await deleteSourceData(vaultRoot, sourceApp), null, 2));
+  console.log(JSON.stringify(await deleteSourceData(vaultRoot, sourceApp, { deleteDerivedKnowledge }), null, 2));
 } else if (action === "export-user-data") {
   console.log(JSON.stringify(await exportUserData(vaultRoot), null, 2));
 } else if (action === "delete-all-user-data") {
@@ -42,12 +42,13 @@ if (action === "state") {
   throw new Error(`Unsupported privacy action: ${action ?? ""}`);
 }
 
-function parseArgs(args: string[]): { action: string; vaultRoot: string; sourceApp?: SourceApp } {
+function parseArgs(args: string[]): { action: string; vaultRoot: string; sourceApp?: SourceApp; deleteDerivedKnowledge: boolean } {
   const sourceApp = readOption(args, "--source-app") as SourceApp | undefined;
   return {
     action: args[0] ?? "",
     vaultRoot: readOption(args, "--vault-root") ?? process.cwd(),
-    ...(sourceApp ? { sourceApp } : {})
+    ...(sourceApp ? { sourceApp } : {}),
+    deleteDerivedKnowledge: args.includes("--delete-derived-knowledge")
   };
 }
 
