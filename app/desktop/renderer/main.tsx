@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Archive,
@@ -202,6 +202,24 @@ interface SensitiveScanResult {
   findings: Array<{ rule_id: string; label: string; sensitivity: string; severity: string; match_preview: string }>;
 }
 
+interface NormalizedRecordView {
+  record_id: string;
+  source_app: string;
+  source_type: string;
+  conversation_id: string;
+  turn_index: number;
+  message_time: string;
+  project: string;
+  topic: string;
+  user_message: string;
+  ai_message: string;
+  raw_path: string;
+  raw_archive_path: string;
+  raw_checksum: string;
+  sensitivity: string;
+  can_enter_personal_kb: boolean;
+}
+
 interface PipelineState {
   phase: PipelinePhase;
   substep?: PipelineSubstep;
@@ -254,6 +272,11 @@ interface OperationResultCardState {
   paths: Array<{ label: string; path: string }>;
   metric_label?: string;
   metric_value?: number;
+}
+
+interface NoticeRecoveryAction {
+  label: string;
+  target: NavKey;
 }
 
 interface ReleaseState {
@@ -368,7 +391,7 @@ interface DesktopApi {
   savePrivacySettings(input: Partial<PrivacySecuritySettings>): Promise<PrivacySecurityState>;
   scanSensitiveContent(input: { content: string }): Promise<SensitiveScanResult>;
   applyRawRetention(): Promise<unknown>;
-  deleteSourceData(input: { source_app: string }): Promise<unknown>;
+  deleteSourceData(input: { source_app: string; delete_derived_knowledge?: boolean }): Promise<unknown>;
   exportUserData(): Promise<unknown>;
   deleteAllUserData(): Promise<unknown>;
   writePrivacyLegalDrafts(): Promise<unknown>;
@@ -379,6 +402,7 @@ interface DesktopApi {
   saveCommercialAccount(input: { account_email: string }): Promise<unknown>;
   createFeedbackDraft(input: { contact_email?: string; category: FeedbackCategory; message: string }): Promise<unknown>;
   listLogs(): Promise<LogEvent[]>;
+  getSourceRecords(input: { record_ids: string[] }): Promise<NormalizedRecordView[]>;
   setConnectorEnabled(input: { sourceApp: string; enabled: boolean }): Promise<unknown>;
   getAutomationState(): Promise<DailyAutomationState>;
   saveAutomationSettings(input: Partial<DailyAutomationSettings>): Promise<DailyAutomationState>;
@@ -600,7 +624,12 @@ function createPreviewDesktopApi(): DesktopApi {
       return { mode: previewState.privacy.settings.raw_retention_mode, deleted_paths: [] };
     },
     async deleteSourceData(input) {
-      return { source_app: input.source_app, deleted_paths: [`raw/imports/${input.source_app}`] };
+      return {
+        source_app: input.source_app,
+        deleted_paths: [`raw/imports/${input.source_app}`],
+        deleted_knowledge_paths: input.delete_derived_knowledge ? ["knowledge/approved/preview.md"] : [],
+        remaining_knowledge_count: input.delete_derived_knowledge ? 0 : previewState.atoms.length
+      };
     },
     async exportUserData() {
       return { export_dir: "data/exports/preview", copied_dir_count: 4 };
@@ -649,6 +678,25 @@ function createPreviewDesktopApi(): DesktopApi {
     },
     async listLogs() {
       return previewState.logs;
+    },
+    async getSourceRecords(input) {
+      return input.record_ids.map((recordId, index) => ({
+        record_id: recordId,
+        source_app: "codex",
+        source_type: "manual_export",
+        conversation_id: "preview-conversation",
+        turn_index: index,
+        message_time: new Date().toISOString(),
+        project: "preview",
+        topic: "预览记录上下文",
+        user_message: "这是一条预览标准化用户消息。",
+        ai_message: "这是一条预览标准化 AI 回复。",
+        raw_path: "raw/imports/codex/preview.md",
+        raw_archive_path: "raw/archive/codex/preview.md",
+        raw_checksum: "preview",
+        sensitivity: "personal",
+        can_enter_personal_kb: true
+      }));
     },
     async setConnectorEnabled(input) {
       previewState.connectors = previewState.connectors.map((connector) => (
@@ -916,11 +964,13 @@ function previewConnector(sourceApp: string, displayName: string, status: Source
 function App() {
   const [active, setActive] = useState<NavKey>("import");
   const [state, setState] = useState<DesktopState | null>(null);
+  const headingRef = useRef<HTMLHeadingElement | null>(null);
   const [selectedId, setSelectedId] = useState("");
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [noticeKind, setNoticeKind] = useState<"info" | "error">("info");
+  const [noticeRecovery, setNoticeRecovery] = useState<NoticeRecoveryAction | null>(null);
   const [bootError, setBootError] = useState("");
   const [operationResult, setOperationResult] = useState<OperationResultCardState | null>(null);
   const [reviewUndo, setReviewUndo] = useState<KnowledgeAtom | null>(null);
@@ -965,6 +1015,22 @@ function App() {
   useEffect(() => {
     void refresh();
   }, []);
+
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, [active]);
+
+  useEffect(() => {
+    if (!reviewUndo) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setReviewUndo(null);
+    }, 8000);
+
+    return () => window.clearTimeout(timer);
+  }, [reviewUndo]);
 
   // 处理进行中轮询流水线子步骤
   useEffect(() => {
@@ -1030,7 +1096,7 @@ function App() {
         setSelectedId(nextState.atoms[0].atom.atom_id);
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = toUserFacingError(error, "本地知识库启动失败。请重试，或检查 vault 目录权限。");
       if (!state) {
         setBootError(message);
         return;
@@ -1107,6 +1173,22 @@ function App() {
     return message;
   }
 
+  function showInfoNotice(message: string) {
+    setNotice(message);
+    setNoticeKind("info");
+    setNoticeRecovery(null);
+  }
+
+  function showErrorNotice(
+    error: unknown,
+    fallback: string,
+    recovery: NoticeRecoveryAction = { label: "查看日志", target: "logs" }
+  ) {
+    setNotice(toUserFacingError(error, fallback));
+    setNoticeKind("error");
+    setNoticeRecovery(recovery);
+  }
+
   async function applyReviewNavigation(
     reviewedAtomId: string,
     pendingBefore: string[],
@@ -1152,6 +1234,7 @@ function App() {
     setBusy(true);
     setNotice("");
     setNoticeKind("info");
+    setNoticeRecovery(null);
     setReviewUndo(null);
     const reviewedAtomId = input.atom_id;
     const previousAtom = state?.atoms.find((item) => item.atom.atom_id === reviewedAtomId)?.atom ?? null;
@@ -1208,8 +1291,7 @@ function App() {
       }
       await applyReviewNavigation(reviewedAtomId, pendingBefore, nextAtoms, input.review_status);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
-      setNoticeKind("error");
+      showErrorNotice(error, "知识审查失败。请查看日志后重试。");
     } finally {
       setBusy(false);
     }
@@ -1243,6 +1325,7 @@ function App() {
     if (clearNotice) {
       setNotice("");
       setNoticeKind("info");
+      setNoticeRecovery(null);
     }
     setLastRunResult(null);
     try {
@@ -1258,8 +1341,7 @@ function App() {
       }
       await refresh();
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
-      setNoticeKind("error");
+      showErrorNotice(error, "运行失败。请查看日志确认失败阶段后重试。");
     } finally {
       setBusy(false);
     }
@@ -1269,15 +1351,16 @@ function App() {
     setBusy(true);
     setNotice("");
     setNoticeKind("info");
+    setNoticeRecovery(null);
     try {
       const result = await action();
       setNotice(successMessage);
       setNoticeKind(kind);
+      setNoticeRecovery(null);
       await refresh();
       return result;
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
-      setNoticeKind("error");
+      showErrorNotice(error, "操作失败。请查看日志后重试。");
       return null;
     } finally {
       setBusy(false);
@@ -1360,14 +1443,14 @@ function App() {
 
   function copyText(value: string) {
     void navigator.clipboard?.writeText(value);
-    setNotice("路径已复制。");
-    setNoticeKind("info");
+    showInfoNotice("路径已复制。");
   }
 
   async function handleImport(sourceApp?: string) {
     if (!isDesktopRuntime()) {
       setNotice("当前为浏览器预览模式，无法打开文件选择框。请使用 npm run desktop:dev 或安装版桌面应用。");
       setNoticeKind("error");
+      setNoticeRecovery({ label: "去设置", target: "settings" });
       return;
     }
 
@@ -1375,19 +1458,20 @@ function App() {
     if (!targetSource) {
       setNotice("没有可用的导入来源，请先在「来源」页启用至少一个连接器。");
       setNoticeKind("error");
+      setNoticeRecovery({ label: "去来源页", target: "sources" });
       return;
     }
     setBusy(true);
     setNotice("正在打开文件选择框...");
     setNoticeKind("info");
+    setNoticeRecovery(null);
     try {
       const result = await getDesktopApi().chooseImportFiles(targetSource) as ImportResult;
       if (!result.copied_file_count) {
-        setNotice("未选择文件。");
-        setNoticeKind("info");
+        showInfoNotice("未选择文件。");
         return;
       }
-      setNotice(formatImportSuccess(result));
+      showInfoNotice(formatImportSuccess(result));
       setImportBatchAtomIds(result.import_batch_atom_ids ?? []);
       await refresh();
       const firstBatchAtomId = result.import_batch_atom_ids?.[0];
@@ -1400,8 +1484,7 @@ function App() {
         setNotice((current) => `${current} 可到「知识库」查看已批准内容。`);
       }
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
-      setNoticeKind("error");
+      showErrorNotice(error, "导入处理失败。请查看日志，修正文件或配置后重试。");
       await refresh();
     } finally {
       setBusy(false);
@@ -1412,17 +1495,17 @@ function App() {
     setBusy(true);
     setNotice("");
     setNoticeKind("info");
+    setNoticeRecovery(null);
     try {
       const result = await getDesktopApi().retryImport() as ImportResult;
-      setNotice(formatImportSuccess(result));
+      showInfoNotice(formatImportSuccess(result));
       setImportBatchAtomIds(result.import_batch_atom_ids ?? []);
       await refresh();
       if ((result.pending_atom_count ?? 0) > 0) {
         setActive("pending");
       }
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
-      setNoticeKind("error");
+      showErrorNotice(error, "重试失败。请查看日志确认失败阶段。");
       await refresh();
     } finally {
       setBusy(false);
@@ -1510,7 +1593,7 @@ function App() {
       <section className="workspace">
         <header className="topbar">
           <div>
-            <h1>{titleFor(active)}</h1>
+            <h1 ref={headingRef} tabIndex={-1}>{titleFor(active)}</h1>
             <p>{subtitleFor(active)}</p>
           </div>
           <div className="topbarActions">
@@ -1567,7 +1650,20 @@ function App() {
           <FixtureModeBanner onGoSettings={() => setActive("settings")} />
         )}
 
-        {notice && <div className={noticeKind === "error" ? "notice error" : "notice"}>{notice}</div>}
+        {notice && (
+          <div
+            className={noticeKind === "error" ? "notice error" : "notice"}
+            role={noticeKind === "error" ? "alert" : "status"}
+            aria-live={noticeKind === "error" ? "assertive" : "polite"}
+          >
+            <span>{notice}</span>
+            {noticeRecovery && (
+              <button type="button" className="secondary noticeAction" onClick={() => setActive(noticeRecovery.target)}>
+                <span>{noticeRecovery.label}</span>
+              </button>
+            )}
+          </div>
+        )}
 
         {active === "guide" && <GuidePanel state={state} counts={counts} onGoImport={() => setActive("import")} onGoPending={() => setActive("pending")} />}
         {active === "sources" && <SourcesPanel connectors={state.connectors} sourceApp={state.sourceApp} busy={busy} onToggle={(sourceApp, enabled) => withBusy(() => getDesktopApi().setConnectorEnabled({ sourceApp, enabled }), "连接器状态已更新")} />}
@@ -1586,6 +1682,7 @@ function App() {
             productGuideDismissed={productGuideDismissed}
             onCompleteOnboarding={completeOnboarding}
             onDismissProductGuide={dismissProductGuide}
+            onGoSources={() => setActive("sources")}
             onGoPending={() => setActive("pending")}
             onGoLibrary={() => goToLibrary()}
             onChooseVault={() => void withBusy(() => getDesktopApi().chooseVault(), "知识库位置已更新")}
@@ -1593,6 +1690,7 @@ function App() {
             onImportBlocked={(message) => {
               setNotice(message);
               setNoticeKind("error");
+              setNoticeRecovery({ label: "去来源页", target: "sources" });
             }}
             onRetryImport={() => void handleRetryImport()}
             onGoSettings={() => setActive("settings")}
@@ -1628,6 +1726,7 @@ function App() {
             onSelect={(atomId) => { setSelectedId(atomId); setActive("detail"); }}
             onMerge={(atomId, targetId) => withBusy(() => getDesktopApi().updateAtom({ atom_id: atomId, review_status: "merged", merged_into: targetId }), "知识已合并")}
             onGoImport={() => setActive("import")}
+            onGoPending={() => setActive("pending")}
             onExport={() => void handleKnowledgeExport()}
             onObsidian={() => void handleObsidianIndex()}
             onBackup={() => void handleKnowledgeBackup()}
@@ -1637,6 +1736,7 @@ function App() {
               }
             }}
             onOpenVaultPath={(vaultPath) => void withBusy(() => getDesktopApi().showVaultPath({ vault_path: vaultPath }), "已打开本地路径")}
+            onCopyText={copyText}
           />
         )}
         {active === "ask" && (
@@ -1660,9 +1760,18 @@ function App() {
                 void withBusy(() => getDesktopApi().applyRawRetention(), "原始记录保留策略已执行");
               }
             }}
-            onDeleteSource={(sourceApp) => {
-              if (confirmDestructive(`删除来源原始文件会移除 ${sourceApp} 的导入文件和归档原始记录，不会删除已生成的知识库条目、运行历史或导出文件。确认继续？`)) {
-                void withBusy(() => getDesktopApi().deleteSourceData({ source_app: sourceApp }), "来源原始文件已删除");
+            onDeleteSource={(sourceApp, deleteDerivedKnowledge) => {
+              if (confirmDestructive(`删除来源原始文件会移除 ${sourceApp} 的导入文件和归档原始记录${deleteDerivedKnowledge ? "，并删除该来源生成的知识库条目" : "，不会删除已生成的知识库条目"}。运行历史和导出文件不会被删除。确认继续？`)) {
+                if (deleteDerivedKnowledge) {
+                  const value = window.prompt("同时删除派生知识会移除该来源已生成的知识条目。请输入“删除派生知识”继续。");
+                  if (value !== "删除派生知识") {
+                    return;
+                  }
+                }
+                void withBusy(
+                  () => getDesktopApi().deleteSourceData({ source_app: sourceApp, delete_derived_knowledge: deleteDerivedKnowledge }),
+                  deleteDerivedKnowledge ? "来源原始文件和派生知识已删除" : "来源原始文件已删除"
+                );
               }
             }}
             onExportUserData={() => withBusy(() => getDesktopApi().exportUserData(), "用户数据导出完成")}
@@ -1805,6 +1914,7 @@ function OnboardingCard({
   sourceApp,
   aiProvider,
   onChooseVault,
+  onGoSources,
   onGoSettings,
   onComplete
 }: {
@@ -1812,6 +1922,7 @@ function OnboardingCard({
   sourceApp: string;
   aiProvider: string;
   onChooseVault: () => void;
+  onGoSources: () => void;
   onGoSettings: () => void;
   onComplete: () => void;
 }) {
@@ -1837,6 +1948,7 @@ function OnboardingCard({
       </div>
       <div className="onboardingActions">
         <button className="secondary" onClick={onChooseVault}><FolderOpen size={16} />选择知识库位置</button>
+        <button className="secondary" onClick={onGoSources}><Archive size={16} />选择来源</button>
         <button className="secondary" onClick={onGoSettings}><Settings size={16} />配置 AI</button>
         <button className="primary" onClick={onComplete}><Check size={16} />使用当前配置</button>
       </div>
@@ -1862,7 +1974,7 @@ function PipelineStatusBar({
   const showSubsteps = pipeline.phase === "importing" || pipeline.phase === "processing" || Boolean(pipeline.substep);
 
   return (
-    <div className={`pipelineStatusWrap phase-${pipeline.phase}`}>
+    <div className={`pipelineStatusWrap phase-${pipeline.phase}`} aria-live="polite" aria-busy={pipeline.phase === "importing" || pipeline.phase === "processing"}>
       <div className={`pipelineStatus phase-${pipeline.phase}`}>
         <Clock size={15} />
         <span>{pipeline.label}</span>
@@ -1995,6 +2107,7 @@ function ImportPanel({
   productGuideDismissed,
   onCompleteOnboarding,
   onDismissProductGuide,
+  onGoSources,
   onGoPending,
   onGoLibrary,
   onChooseVault,
@@ -2017,6 +2130,7 @@ function ImportPanel({
   productGuideDismissed: boolean;
   onCompleteOnboarding: () => void;
   onDismissProductGuide: () => void;
+  onGoSources: () => void;
   onGoPending: () => void;
   onGoLibrary: () => void;
   onChooseVault: () => void;
@@ -2072,6 +2186,7 @@ function ImportPanel({
             sourceApp={resolvedImportSource || sourceApp}
             aiProvider={aiProvider}
             onChooseVault={onChooseVault}
+            onGoSources={onGoSources}
             onGoSettings={onGoSettings}
             onComplete={onCompleteOnboarding}
           />
@@ -2124,7 +2239,7 @@ function ImportPanel({
         {(busy || pipeline.phase === "failed") && (
           <div className={`importPipelineProgress phase-${pipeline.phase}`}>
             <strong>{pipeline.label}</strong>
-            {pipeline.phase === "failed" && pipeline.error && <p className="muted">{pipeline.error}</p>}
+            {pipeline.phase === "failed" && pipeline.error && <p className="muted">{toUserFacingError(pipeline.error, "处理失败。请查看日志确认失败阶段后重试。")}</p>}
             {pipeline.phase === "failed" && pipeline.can_retry && (
               <button type="button" className="secondary" onClick={onRetryImport} disabled={busy}>
                 <RefreshCw size={16} />
@@ -2395,11 +2510,13 @@ function LibraryPanel({
   onSelect,
   onMerge,
   onGoImport,
+  onGoPending,
   onExport,
   onObsidian,
   onBackup,
   onRestore,
-  onOpenVaultPath
+  onOpenVaultPath,
+  onCopyText
 }: {
   atoms: KnowledgeAtomDocument[];
   knowledge: KnowledgeLibraryView;
@@ -2412,11 +2529,13 @@ function LibraryPanel({
   onSelect: (atomId: string) => void;
   onMerge: (atomId: string, targetId: string) => void;
   onGoImport: () => void;
+  onGoPending: () => void;
   onExport: () => void;
   onObsidian: () => void;
   onBackup: () => void;
   onRestore: () => void;
   onOpenVaultPath: (vaultPath: string) => void;
+  onCopyText: (text: string) => void;
 }) {
   const [query, setQuery] = useState("");
   const [sourceApp, setSourceApp] = useState("");
@@ -2427,6 +2546,8 @@ function LibraryPanel({
   const focusSet = useMemo(() => new Set(focusAtomIds), [focusAtomIds]);
   const recentSet = useMemo(() => new Set(recentlyApprovedIds), [recentlyApprovedIds]);
   const showRecentHighlight = focusAtomIds.length > 0 || recentlyApprovedIds.length > 0;
+  const approvedCount = atoms.filter((item) => item.atom.review_status === "approved").length;
+  const pendingCount = atoms.filter((item) => item.atom.review_status === "pending").length;
 
   useEffect(() => {
     if (focusAtomIds.length > 0) {
@@ -2504,17 +2625,18 @@ function LibraryPanel({
           </label>
         </div>
         <div className="libraryToolbar">
-          <button className="secondary" onClick={onExport} disabled={busy} title="将全部已批准知识导出为 Markdown 文件"><Download size={16} />导出 Markdown</button>
-          <button className="secondary" onClick={onObsidian} disabled={busy} title="生成 Obsidian 兼容的索引和文件结构"><BookOpenCheck size={16} />Obsidian 索引</button>
+          <button className="secondary" onClick={onExport} disabled={busy || approvedCount === 0} title={approvedCount === 0 ? "暂无已批准知识可导出" : "将全部已批准知识导出为 Markdown 文件"}><Download size={16} />导出已批准 Markdown</button>
+          <button className="secondary" onClick={onObsidian} disabled={busy} title="生成包含 approved、pending、merged、rejected 的 Obsidian 兼容索引"><BookOpenCheck size={16} />全状态 Obsidian 索引</button>
           <button className="secondary" onClick={onBackup} disabled={busy} title="创建知识库完整备份到本地"><HardDriveDownload size={16} />备份</button>
           <button className="secondary" onClick={onRestore} disabled={busy} title="从最近一次备份恢复知识库"><RefreshCw size={16} />恢复最近备份</button>
         </div>
         {operationResult && (
-          <OperationResultCard
-            result={operationResult}
-            onOpenVaultPath={onOpenVaultPath}
-            onDismiss={onClearOperationResult}
-          />
+            <OperationResultCard
+              result={operationResult}
+              onOpenVaultPath={onOpenVaultPath}
+              onCopyText={onCopyText}
+              onDismiss={onClearOperationResult}
+            />
         )}
       </section>
 
@@ -2540,11 +2662,13 @@ function LibraryPanel({
           ))}
           {filtered.length === 0 && (
             <div className="emptyState">
-              <p>{atoms.length === 0 ? "当前还没有知识。" : "当前筛选条件下没有匹配的知识。"}</p>
-              <p className="muted">{atoms.length === 0 ? "先导入文件并批准候选知识，批准后会出现在这里。" : "可以清除筛选，或换一个关键词重新搜索。"}</p>
+              <p>{libraryEmptyTitle(atoms.length, approvedCount, status)}</p>
+              <p className="muted">{libraryEmptyHint(atoms.length, approvedCount, status)}</p>
               <div className="actions">
                 {atoms.length === 0 ? (
                   <button className="primary" onClick={onGoImport}><FileInput size={16} />去导入</button>
+                ) : status === "approved" && approvedCount === 0 && pendingCount > 0 ? (
+                  <button className="primary" onClick={onGoPending}><ListChecks size={16} />去待确认</button>
                 ) : (
                   <button className="secondary" onClick={clearFilters}><RefreshCw size={16} />清除筛选</button>
                 )}
@@ -2713,10 +2837,12 @@ function AskPanel({
 function OperationResultCard({
   result,
   onOpenVaultPath,
+  onCopyText,
   onDismiss
 }: {
   result: OperationResultCardState;
   onOpenVaultPath: (vaultPath: string) => void;
+  onCopyText: (text: string) => void;
   onDismiss: () => void;
 }) {
   return (
@@ -2739,6 +2865,10 @@ function OperationResultCard({
             <button className="secondary" onClick={() => onOpenVaultPath(item.path)} title="在系统文件夹中打开">
               <FolderOpen size={16} />
               打开
+            </button>
+            <button className="secondary" onClick={() => onCopyText(item.path)} title="复制 vault 内相对路径">
+              <FileText size={16} />
+              复制路径
             </button>
           </div>
         ))}
@@ -2765,7 +2895,7 @@ function PrivacyPanel({
   onSaveSettings: (input: Partial<PrivacySecuritySettings>) => void;
   onScan: (content: string) => Promise<SensitiveScanResult>;
   onApplyRetention: () => void;
-  onDeleteSource: (sourceApp: string) => void;
+  onDeleteSource: (sourceApp: string, deleteDerivedKnowledge: boolean) => void;
   onExportUserData: () => void;
   onDeleteAllUserData: () => void;
   onWriteLegalDrafts: () => void;
@@ -2774,6 +2904,7 @@ function PrivacyPanel({
   const [scanText, setScanText] = useState("客户合同里出现 api_key: sk-example-secret");
   const [scanResult, setScanResult] = useState<SensitiveScanResult | null>(null);
   const [sourceToDelete, setSourceToDelete] = useState(connectors[0]?.source_app ?? "codex");
+  const [deleteDerivedKnowledge, setDeleteDerivedKnowledge] = useState(false);
 
   useEffect(() => {
     setSettings(privacy.settings);
@@ -2846,8 +2977,17 @@ function PrivacyPanel({
         <h2>用户数据</h2>
         <p className="muted">删除来源原始文件只会移除该来源的导入文件和原始归档，不会删除已经批准进知识库的派生知识。</p>
         <div className="formGrid"><label>删除来源原始文件<select value={sourceToDelete} onChange={(event) => setSourceToDelete(event.target.value)}>{connectors.map((connector) => <option key={connector.source_app} value={connector.source_app}>{connector.display_name}</option>)}</select></label></div>
+        <label className="checkboxLine">
+          <input
+            type="checkbox"
+            checked={deleteDerivedKnowledge}
+            onChange={(event) => setDeleteDerivedKnowledge(event.target.checked)}
+          />
+          <span>同时删除该来源生成的知识库条目</span>
+        </label>
+        <p className="muted">默认只删除原始文件；勾选后会额外删除该来源已生成的知识条目，但不会删除运行历史和导出文件。</p>
         <div className="privacyActions userDataActions">
-          <button className="danger" onClick={() => onDeleteSource(sourceToDelete)} disabled={busy}><Trash2 size={16} />删除来源原始文件</button>
+          <button className="danger" onClick={() => onDeleteSource(sourceToDelete, deleteDerivedKnowledge)} disabled={busy}><Trash2 size={16} />删除来源原始文件</button>
           <button className="secondary" onClick={onExportUserData} disabled={busy}><Download size={16} />导出用户数据</button>
           <button className="danger" onClick={onDeleteAllUserData} disabled={busy}><Trash2 size={16} />彻底删除本地数据</button>
         </div>
@@ -3242,6 +3382,8 @@ function DetailPanel({
   const [content, setContent] = useState(document.atom.content);
   const [tags, setTags] = useState(document.atom.tags.join(", "));
   const [mergedInto, setMergedInto] = useState(document.atom.merged_into);
+  const [sourceRecords, setSourceRecords] = useState<NormalizedRecordView[]>([]);
+  const [sourceRecordError, setSourceRecordError] = useState("");
 
   useEffect(() => {
     setTitle(document.atom.title);
@@ -3250,6 +3392,32 @@ function DetailPanel({
     setTags(document.atom.tags.join(", "));
     setMergedInto(document.atom.merged_into);
   }, [document.atom.atom_id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setSourceRecords([]);
+    setSourceRecordError("");
+
+    if (document.atom.source_record_ids.length === 0) {
+      return;
+    }
+
+    void getDesktopApi().getSourceRecords({ record_ids: document.atom.source_record_ids })
+      .then((records) => {
+        if (!cancelled) {
+          setSourceRecords(records);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setSourceRecordError(toUserFacingError(error, "无法读取标准化记录上下文。请查看日志确认本地索引状态。"));
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [document.atom.atom_id, document.atom.source_record_ids]);
 
   const baseInput = { atom_id: document.atom.atom_id, title, type, content, tags: tags.split(",").map((tag) => tag.trim()).filter(Boolean) };
 
@@ -3277,6 +3445,7 @@ function DetailPanel({
             <div className="sourceCitationCard" key={`${rawPath}-${index}`}>
               <span>{document.atom.source_app} · 记录 {document.atom.source_record_ids[index] ?? document.atom.source_record_ids[0] ?? "unknown"}</span>
               <code>{rawPath}</code>
+              <small>证据摘录：{document.atom.evidence || "无"}</small>
               <div className="sourceCitationActions">
                 <button className="secondary" onClick={() => onOpenVaultPath(rawPath)} disabled={busy} title="在系统文件夹中打开原始文件">
                   <FolderOpen size={16} />
@@ -3295,6 +3464,28 @@ function DetailPanel({
             </div>
           )}
         </div>
+        <details className="sourceRecordContext">
+          <summary>查看标准化记录上下文</summary>
+          {sourceRecordError ? (
+            <p className="muted">{sourceRecordError}</p>
+          ) : sourceRecords.length === 0 ? (
+            <p className="muted">暂无可展示的标准化记录上下文。</p>
+          ) : (
+            <div className="sourceRecordList">
+              {sourceRecords.map((record) => (
+                <div className="sourceRecordCard" key={record.record_id}>
+                  <strong>{record.topic || "未命名记录"}</strong>
+                  <span>{record.source_app} · {record.source_type} · {record.project || "未分项目"} · {record.message_time}</span>
+                  <small>记录 ID：{record.record_id}</small>
+                  <small>归档路径：{record.raw_archive_path || record.raw_path}</small>
+                  <small>Checksum：{record.raw_checksum || "未记录"}</small>
+                  <p>用户：{truncateText(record.user_message, 220)}</p>
+                  {record.ai_message && <p>AI：{truncateText(record.ai_message, 220)}</p>}
+                </div>
+              ))}
+            </div>
+          )}
+        </details>
       </div>
       <div className="actions">
         <button className="secondary" onClick={() => onUpdate(baseInput)} disabled={busy} title="保存标题、类型、标签和正文的修改"><SquarePen size={16} />保存</button>
@@ -3529,6 +3720,49 @@ function reviewStatusLabel(status?: ReviewStatus): string {
     default:
       return "知识已更新";
   }
+}
+
+function libraryEmptyTitle(totalCount: number, approvedCount: number, status: string): string {
+  if (totalCount === 0) {
+    return "当前还没有知识。";
+  }
+  if (status === "approved" && approvedCount === 0) {
+    return "暂无已批准知识。";
+  }
+  return "当前筛选条件下没有匹配的知识。";
+}
+
+function libraryEmptyHint(totalCount: number, approvedCount: number, status: string): string {
+  if (totalCount === 0) {
+    return "先导入文件并批准候选知识，批准后会出现在这里。";
+  }
+  if (status === "approved" && approvedCount === 0) {
+    return "候选内容还在待确认区，批准后才会进入知识库。";
+  }
+  return "可以清除筛选，或换一个关键词重新搜索。";
+}
+
+function toUserFacingError(error: unknown, fallback: string): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  const normalized = raw.replace(/\/Users\/[^\s，。；;]+/g, "<local_path>").trim();
+
+  if (/未配置本地加密 API Key|requires AI_KB_OPENAI_API_KEY|OpenAI-compatible provider/.test(normalized)) {
+    return "真实 AI 配置不完整。请在设置页确认服务商、模型和 API Key 后重试。";
+  }
+  if (/JSON import requires|Markdown import requires|front matter|Missing required|Expected .*message|Invalid sensitivity/.test(normalized)) {
+    return "导入文件格式不符合要求。请检查文件结构、敏感度字段和消息内容后重试。";
+  }
+  if (/连接器未启用|没有可用的导入来源|预留连接器|不能启用/.test(normalized)) {
+    return normalized;
+  }
+  if (/没有可恢复的知识库备份/.test(normalized)) {
+    return "当前没有可恢复的知识库备份。请先创建备份后再尝试恢复。";
+  }
+  if (/failed|失败|error|Error|ENOENT|SQLITE|better-sqlite3/i.test(normalized)) {
+    return fallback;
+  }
+
+  return normalized || fallback;
 }
 
 function titleFor(active: NavKey): string {

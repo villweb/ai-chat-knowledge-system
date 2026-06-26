@@ -49,7 +49,7 @@ export async function listKnowledgeAtomDocuments(vaultRoot: string): Promise<Kno
   return dedupeKnowledgeAtomDocuments(documents);
 }
 
-async function listAllKnowledgeAtomDocuments(vaultRoot: string): Promise<KnowledgeAtomDocument[]> {
+export async function listAllKnowledgeAtomDocuments(vaultRoot: string): Promise<KnowledgeAtomDocument[]> {
   const documents: KnowledgeAtomDocument[] = [];
 
   for (const dir of KNOWLEDGE_DIRS) {

@@ -16,6 +16,7 @@ AI Chat Knowledge System 是一个本地优先的 AI 对话知识沉淀系统。
 - 支持 Codex、Cursor、DeepSeek 首批来源，豆包和 Workbuddy 预留连接器入口。
 - 支持应用打开时的每日自动化运行、空闲检测、运行前确认、失败重试和运行历史。
 - 支持知识库搜索、来源/类型/项目/标签筛选、每日沉淀日历、Markdown 导出、Obsidian 索引、本地备份和恢复。
+- 支持基于已批准知识的本地检索式提问，回答区展示引用知识、证据摘录和来源路径。
 - 支持本地敏感内容识别、来源授权说明、原始记录保留策略、按来源删除、用户数据导出和彻底删除。
 - 支持 API Key 本地加密保存，避免明文散落在普通配置文件中。
 - 支持 macOS DMG/ZIP、Windows NSIS/portable 安装包配置、发布通道和应用更新检查入口。
@@ -32,6 +33,9 @@ AI Chat Knowledge System 是一个本地优先的 AI 对话知识沉淀系统。
 - 不自动网页登录，不读取浏览器 Cookie，不绕过平台权限。
 - API Key 可选择本地加密保存；不填写时不会新增保存。当前加密密钥仍在本地 vault 内，尚未接入 macOS Keychain 或 Windows Credential Manager。
 - 未明确判断可进入个人知识库的内容默认按更保守策略处理。
+- 真实 AI 模式只会发送脱敏、截断后的 personal 记录摘录，字段包括 `topic`、`project`、`user_excerpt`、`ai_excerpt`、`context_summary`。
+- 真实 AI 模式不会发送 API Key 原文、被规则阻断的 private/confidential 记录，也不会发送大段完整原始文件。
+- “删除来源原始文件”默认只删除该来源的导入文件和原始归档；只有显式勾选并二次确认后，才会删除该来源生成的知识库条目。
 
 真实用户数据目录默认不提交到 Git。
 

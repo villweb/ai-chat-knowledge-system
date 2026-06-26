@@ -39,6 +39,7 @@
   --btn-disabled-bg: #eceff1;
   --btn-disabled-border: #d4d8dd;
   --btn-disabled-text: #737a82;
+  --focus-ring: #1f7a55;
 }
 
 * {
@@ -67,6 +68,23 @@ button {
 button:disabled {
   cursor: not-allowed;
   opacity: 1;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  border-color: var(--focus-ring);
 }
 
 .boot {
@@ -345,6 +363,10 @@ nav {
 }
 
 .notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   padding: 12px 14px;
   border: 1px solid #bad7ef;
   border-radius: 8px;
@@ -358,6 +380,28 @@ nav {
   border-color: #efb6b6;
   background: #fff5f5;
   color: #7a2323;
+}
+
+.notice > span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.noticeAction {
+  flex: 0 0 auto;
+  min-height: var(--btn-height-sm);
+  padding: 0 var(--btn-pad-x-sm);
+  border: 1px solid currentColor;
+  border-radius: var(--btn-radius);
+  background: rgba(255, 255, 255, 0.72);
+  color: inherit;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.noticeAction:hover:not(:disabled) {
+  background: #ffffff;
 }
 
 .topbarActions {
@@ -1921,6 +1965,48 @@ nav {
   gap: 8px;
 }
 
+.sourceRecordContext {
+  display: grid;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.sourceRecordContext summary {
+  cursor: pointer;
+  color: #23724f;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.sourceRecordList {
+  display: grid;
+  gap: 8px;
+}
+
+.sourceRecordCard {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid #dce3e0;
+  border-radius: 8px;
+  background: #f7f9f8;
+}
+
+.sourceRecordCard strong {
+  color: #17221f;
+  font-size: 13px;
+}
+
+.sourceRecordCard span,
+.sourceRecordCard small,
+.sourceRecordCard p {
+  margin: 0;
+  color: #56655f;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;
@@ -2266,7 +2352,7 @@ nav {
 
 .operationPathRow {
   display: grid;
-  grid-template-columns: 84px minmax(0, 1fr) auto;
+  grid-template-columns: 84px minmax(0, 1fr) auto auto;
   gap: 8px;
   align-items: center;
 }
@@ -2347,6 +2433,29 @@ nav {
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 14px;
+}
+
+.checkboxLine {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #ead1d1;
+  border-radius: 8px;
+  background: #fffafa;
+  color: #532f2f;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.checkboxLine input {
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  flex: 0 0 auto;
+  accent-color: #8a2f25;
 }
 
 .userDataActions button {

@@ -501,13 +501,23 @@ function registerIpc() {
   ipcMain.handle("privacy:apply-retention", async () => runPrivacyAction("apply-retention", undefined, "执行原始记录保留策略失败。"));
   ipcMain.handle("privacy:delete-source", async (_event, input) => {
     if (!input?.source_app) throw new Error("缺少要删除的来源。");
-    return runPrivacyAction("delete-source", undefined, "删除来源数据失败。", ["--source-app", input.source_app]);
+    const args = ["--source-app", input.source_app];
+    if (input.delete_derived_knowledge) {
+      args.push("--delete-derived-knowledge");
+    }
+    return runPrivacyAction("delete-source", undefined, "删除来源数据失败。", args);
   });
   ipcMain.handle("privacy:export-user-data", async () => runPrivacyAction("export-user-data", undefined, "导出用户数据失败。"));
   ipcMain.handle("privacy:delete-all-user-data", async () => runPrivacyAction("delete-all-user-data", undefined, "彻底删除用户数据失败。"));
   ipcMain.handle("privacy:write-legal-drafts", async () => runPrivacyAction("write-legal-drafts", undefined, "生成隐私政策和用户协议草案失败。"));
 
   ipcMain.handle("logs:list", async () => listLogs());
+  ipcMain.handle("records:get", async (_event, input) => {
+    const recordIds = Array.isArray(input?.record_ids)
+      ? input.record_ids.filter((item) => typeof item === "string" && item.trim()).map((item) => item.trim())
+      : [];
+    return getNormalizedRecordsByIds(recordIds);
+  });
 
   ipcMain.handle("automation:get-state", async () => getAutomationState());
 
@@ -1033,6 +1043,49 @@ async function listLogs() {
     return events.slice(-80).reverse();
   } catch {
     return [];
+  }
+}
+
+function getNormalizedRecordsByIds(recordIds) {
+  if (recordIds.length === 0) {
+    return [];
+  }
+
+  const Database = require("better-sqlite3");
+  const db = new Database(path.join(state.vaultRoot, "data/runtime/normalized-records.sqlite"), { fileMustExist: true });
+  try {
+    const placeholders = recordIds.map((_, index) => `@record_id_${index}`).join(", ");
+    const params = {};
+    recordIds.forEach((recordId, index) => {
+      params[`record_id_${index}`] = recordId;
+    });
+    const rows = db.prepare(`
+      SELECT
+        record_id,
+        source_app,
+        source_type,
+        conversation_id,
+        turn_index,
+        message_time,
+        project,
+        topic,
+        user_message,
+        ai_message,
+        raw_path,
+        raw_archive_path,
+        raw_checksum,
+        sensitivity,
+        can_enter_personal_kb
+      FROM normalized_records
+      WHERE record_id IN (${placeholders})
+      ORDER BY message_time ASC, turn_index ASC
+    `).all(params);
+    return rows.map((row) => ({
+      ...row,
+      can_enter_personal_kb: Boolean(row.can_enter_personal_kb)
+    }));
+  } finally {
+    db.close();
   }
 }
 

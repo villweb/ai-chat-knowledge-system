@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld("desktopApi", {
   saveCommercialAccount: (input) => ipcRenderer.invoke("commercial:save-account", input),
   createFeedbackDraft: (input) => ipcRenderer.invoke("commercial:create-feedback", input),
   listLogs: () => ipcRenderer.invoke("logs:list"),
+  getSourceRecords: (input) => ipcRenderer.invoke("records:get", input),
   setConnectorEnabled: (input) => ipcRenderer.invoke("connectors:set-enabled", input),
   getAutomationState: () => ipcRenderer.invoke("automation:get-state"),
   saveAutomationSettings: (input) => ipcRenderer.invoke("automation:save-settings", input),

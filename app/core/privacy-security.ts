@@ -3,7 +3,8 @@ import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promi
 import path from "node:path";
 import { listSourceConnectorManifests } from "../connectors";
 import type { DailyRun, Sensitivity, SourceApp, VaultRelativePath } from "../schemas";
-import { resolveVaultPath } from "../storage";
+import { LocalStorageProvider, resolveVaultPath } from "../storage";
+import { dedupeKnowledgeAtomDocuments, listAllKnowledgeAtomDocuments } from "./knowledge-review";
 
 export type RawRetentionMode = "keep_forever" | "delete_after_days" | "delete_after_successful_run";
 export type SensitiveFindingSeverity = "low" | "medium" | "high";
@@ -78,6 +79,8 @@ export interface UserDataExportSummary {
 export interface SourceDataDeleteSummary {
   source_app: SourceApp;
   deleted_paths: VaultRelativePath[];
+  deleted_knowledge_paths: VaultRelativePath[];
+  remaining_knowledge_count?: number;
 }
 
 export interface UserDataDeleteSummary {
@@ -259,7 +262,11 @@ export async function applyRawRetentionPolicy(vaultRoot: string, now = new Date(
   return { mode: settings.raw_retention_mode, deleted_paths: deletedPaths };
 }
 
-export async function deleteSourceData(vaultRoot: string, sourceApp: SourceApp): Promise<SourceDataDeleteSummary> {
+export async function deleteSourceData(
+  vaultRoot: string,
+  sourceApp: SourceApp,
+  options: { deleteDerivedKnowledge?: boolean } = {}
+): Promise<SourceDataDeleteSummary> {
   const deletedPaths: VaultRelativePath[] = [];
   for (const item of [`raw/imports/${sourceApp}`, `raw/archive/${sourceApp}`]) {
     const absolutePath = resolveVaultPath(vaultRoot, item);
@@ -268,7 +275,58 @@ export async function deleteSourceData(vaultRoot: string, sourceApp: SourceApp):
       deletedPaths.push(item);
     }
   }
-  return { source_app: sourceApp, deleted_paths: deletedPaths };
+
+  const deleteDerivedKnowledge = options.deleteDerivedKnowledge === true;
+  const derivedKnowledgeResult = deleteDerivedKnowledge
+    ? await deleteDerivedKnowledgeForSource(vaultRoot, sourceApp)
+    : { deleted_paths: [], remaining_count: undefined };
+
+  const summary: SourceDataDeleteSummary = {
+    source_app: sourceApp,
+    deleted_paths: deletedPaths,
+    deleted_knowledge_paths: derivedKnowledgeResult.deleted_paths
+  };
+  if (derivedKnowledgeResult.remaining_count !== undefined) {
+    summary.remaining_knowledge_count = derivedKnowledgeResult.remaining_count;
+  }
+  return summary;
+}
+
+async function deleteDerivedKnowledgeForSource(
+  vaultRoot: string,
+  sourceApp: SourceApp
+): Promise<{ deleted_paths: VaultRelativePath[]; remaining_count: number }> {
+  const documents = await listAllKnowledgeAtomDocuments(vaultRoot);
+  const deletedPaths: VaultRelativePath[] = [];
+  const remainingDocuments = [];
+
+  for (const document of documents) {
+    if (isDerivedFromSource(document.atom.source_app, document.atom.source_raw_paths, sourceApp)) {
+      await rm(resolveVaultPath(vaultRoot, document.file_path), { force: true });
+      deletedPaths.push(document.file_path);
+    } else {
+      remainingDocuments.push(document);
+    }
+  }
+
+  const remainingAtoms = dedupeKnowledgeAtomDocuments(remainingDocuments).map((document) => document.atom);
+  const storage = new LocalStorageProvider({
+    vault_root: vaultRoot,
+    sqlite_path: "data/runtime/normalized-records.sqlite"
+  });
+  try {
+    await storage.writeKnowledgeAtomIndex(remainingAtoms);
+  } finally {
+    storage.close();
+  }
+
+  return { deleted_paths: deletedPaths, remaining_count: remainingAtoms.length };
+}
+
+function isDerivedFromSource(atomSourceApp: SourceApp, rawPaths: VaultRelativePath[], sourceApp: SourceApp): boolean {
+  return atomSourceApp === sourceApp || rawPaths.some((rawPath) =>
+    rawPath.startsWith(`raw/imports/${sourceApp}/`) || rawPath.startsWith(`raw/archive/${sourceApp}/`)
+  );
 }
 
 export async function exportUserData(vaultRoot: string, now = new Date()): Promise<UserDataExportSummary> {
