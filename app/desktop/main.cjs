@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, Notification, powerMonitor } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, Notification, powerMonitor, shell } = require("electron");
 const { spawn } = require("node:child_process");
 const { copyFile, mkdir, readdir, readFile, writeFile } = require("node:fs/promises");
 const path = require("node:path");
@@ -132,6 +132,16 @@ function registerIpc() {
       pushEvent("vault_selected", `知识库位置已切换：${path.basename(state.vaultRoot)}`);
     }
     return { vaultRoot: state.vaultRoot };
+  });
+
+  ipcMain.handle("vault:show-path", async (_event, input) => {
+    const vaultPath = typeof input?.vault_path === "string" ? input.vault_path : "";
+    if (!vaultPath.trim()) {
+      throw new Error("缺少要打开的 vault 路径。");
+    }
+    const absolutePath = resolveVaultScopedPath(vaultPath);
+    shell.showItemInFolder(absolutePath);
+    return { ok: true, path: vaultPath };
   });
 
   ipcMain.handle("settings:save-session-config", async (_event, input) => {
@@ -652,6 +662,15 @@ function getReleaseState() {
     default_vault_root: buildDefaultVaultRoot(),
     update_enabled: app.isPackaged || Boolean(process.env[releaseInfo.update_url_env])
   };
+}
+
+function resolveVaultScopedPath(vaultPath) {
+  const root = path.resolve(state.vaultRoot);
+  const target = path.resolve(root, vaultPath);
+  if (target !== root && !target.startsWith(`${root}${path.sep}`)) {
+    throw new Error(`路径超出知识库范围：${vaultPath}`);
+  }
+  return target;
 }
 
 function configureAutoUpdater() {

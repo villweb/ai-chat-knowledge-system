@@ -235,6 +235,27 @@ interface DailyRunResult {
   generated_atom_count?: number;
 }
 
+interface KnowledgeExportResult {
+  export_dir?: string;
+  index_path?: string;
+  exported_file_count?: number;
+}
+
+interface KnowledgeBackupResult {
+  backup_dir?: string;
+  manifest_path?: string;
+  copied_dir_count?: number;
+  restored_dir_count?: number;
+}
+
+interface OperationResultCardState {
+  title: string;
+  message: string;
+  paths: Array<{ label: string; path: string }>;
+  metric_label?: string;
+  metric_value?: number;
+}
+
 interface ReleaseState {
   app_name: string;
   app_id: string;
@@ -331,6 +352,7 @@ interface AtomUpdateInput {
 interface DesktopApi {
   getState(): Promise<DesktopState>;
   chooseVault(): Promise<DesktopState>;
+  showVaultPath(input: { vault_path: string }): Promise<unknown>;
   chooseImportFiles(sourceApp: string): Promise<ImportResult>;
   retryImport(): Promise<ImportResult>;
   runImport(): Promise<unknown>;
@@ -381,6 +403,7 @@ function isDesktopRuntime(): boolean {
 }
 
 const PRODUCT_GUIDE_DISMISS_KEY = "ai-kb-product-guide-dismissed";
+const ONBOARDING_COMPLETED_KEY = "ai-kb-onboarding-completed";
 
 const pipelineSubsteps = [
   { key: "copying", label: "复制中" },
@@ -495,6 +518,9 @@ function createPreviewDesktopApi(): DesktopApi {
     },
     async chooseVault() {
       return previewState;
+    },
+    async showVaultPath() {
+      return { ok: true };
     },
     async chooseImportFiles() {
       throw new Error("当前为浏览器预览模式，无法打开文件选择框。请使用 npm run desktop:dev 或安装版桌面应用。");
@@ -897,6 +923,15 @@ function App() {
   const [notice, setNotice] = useState("");
   const [noticeKind, setNoticeKind] = useState<"info" | "error">("info");
   const [bootError, setBootError] = useState("");
+  const [operationResult, setOperationResult] = useState<OperationResultCardState | null>(null);
+  const [reviewUndo, setReviewUndo] = useState<KnowledgeAtom | null>(null);
+  const [onboardingCompleted, setOnboardingCompleted] = useState(() => {
+    try {
+      return localStorage.getItem(ONBOARDING_COMPLETED_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
   const [productGuideDismissed, setProductGuideDismissed] = useState(() => {
     try {
       return localStorage.getItem(PRODUCT_GUIDE_DISMISS_KEY) === "1";
@@ -1014,6 +1049,15 @@ function App() {
     }
   }
 
+  function completeOnboarding() {
+    setOnboardingCompleted(true);
+    try {
+      localStorage.setItem(ONBOARDING_COMPLETED_KEY, "1");
+    } catch {
+      // 忽略本地存储不可用
+    }
+  }
+
   function goToLibrary(focusAtomIds?: string[]) {
     const ids = focusAtomIds ?? recentlyApprovedIds;
     setLibraryFocusAtomIds(ids);
@@ -1109,7 +1153,9 @@ function App() {
     setBusy(true);
     setNotice("");
     setNoticeKind("info");
+    setReviewUndo(null);
     const reviewedAtomId = input.atom_id;
+    const previousAtom = state?.atoms.find((item) => item.atom.atom_id === reviewedAtomId)?.atom ?? null;
     const pendingBefore = (state?.atoms ?? [])
       .filter((item) => item.atom.review_status === "pending")
       .map((item) => item.atom.atom_id);
@@ -1143,6 +1189,9 @@ function App() {
       if (options?.stayOnList) {
         const freshPending = nextAtoms.filter((item) => item.atom.review_status === "pending");
         const reviewLabel = reviewStatusLabel(input.review_status);
+        if (previousAtom && input.review_status) {
+          setReviewUndo(previousAtom);
+        }
         if (input.review_status === "approved") {
           setRecentlyApprovedIds((previous) => [reviewedAtomId, ...previous.filter((id) => id !== reviewedAtomId)]);
         }
@@ -1155,6 +1204,9 @@ function App() {
         return;
       }
 
+      if (previousAtom && input.review_status) {
+        setReviewUndo(previousAtom);
+      }
       await applyReviewNavigation(reviewedAtomId, pendingBefore, nextAtoms, input.review_status);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
@@ -1162,6 +1214,25 @@ function App() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function undoLastReview() {
+    if (!reviewUndo) {
+      return;
+    }
+    const atom = reviewUndo;
+    setReviewUndo(null);
+    await withBusy(() => getDesktopApi().updateAtom({
+      atom_id: atom.atom_id,
+      title: atom.title,
+      type: atom.type,
+      content: atom.content,
+      tags: atom.tags,
+      review_status: atom.review_status,
+      merged_into: atom.merged_into
+    }), "已撤销上一次审查操作。");
+    setSelectedId(atom.atom_id);
+    setActive(atom.review_status === "pending" ? "pending" : "detail");
   }
 
   async function handleRunDaily(
@@ -1195,21 +1266,88 @@ function App() {
     }
   }
 
-  async function withBusy(action: () => Promise<unknown>, successMessage: string, kind: "info" | "error" = "info") {
+  async function withBusy(action: () => Promise<unknown>, successMessage: string, kind: "info" | "error" = "info"): Promise<unknown | null> {
     setBusy(true);
     setNotice("");
     setNoticeKind("info");
     try {
-      await action();
+      const result = await action();
       setNotice(successMessage);
       setNoticeKind(kind);
       await refresh();
+      return result;
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
       setNoticeKind("error");
+      return null;
     } finally {
       setBusy(false);
     }
+  }
+
+  async function handleKnowledgeExport() {
+    const result = await withBusy(() => getDesktopApi().exportKnowledgeMarkdown(), "Markdown 导出完成") as KnowledgeExportResult | null;
+    if (!result) {
+      return;
+    }
+    setOperationResult({
+      title: "Markdown 导出完成",
+      message: "已导出全部已批准知识。",
+      paths: buildResultPaths([
+        { label: "导出目录", path: result.export_dir },
+        { label: "索引文件", path: result.index_path }
+      ]),
+      metric_label: "导出文件",
+      metric_value: result.exported_file_count ?? 0
+    });
+  }
+
+  async function handleObsidianIndex() {
+    const result = await withBusy(() => getDesktopApi().ensureObsidianCompatibility(), "Obsidian 索引已更新") as KnowledgeExportResult | null;
+    if (!result) {
+      return;
+    }
+    setOperationResult({
+      title: "Obsidian 索引已更新",
+      message: "已生成 Obsidian 兼容索引，可在本地知识库中打开。",
+      paths: buildResultPaths([
+        { label: "知识库目录", path: result.export_dir },
+        { label: "索引文件", path: result.index_path }
+      ]),
+      metric_label: "索引条目",
+      metric_value: result.exported_file_count ?? 0
+    });
+  }
+
+  async function handleKnowledgeBackup() {
+    const result = await withBusy(() => getDesktopApi().backupKnowledge(), "知识库备份已创建") as KnowledgeBackupResult | null;
+    if (!result) {
+      return;
+    }
+    setOperationResult({
+      title: "知识库备份已创建",
+      message: "已在本地创建知识库、运行记录和日志备份。",
+      paths: buildResultPaths([
+        { label: "备份目录", path: result.backup_dir },
+        { label: "备份清单", path: result.manifest_path }
+      ]),
+      metric_label: "备份目录数",
+      metric_value: result.copied_dir_count ?? 0
+    });
+  }
+
+  async function handleKnowledgeRestore() {
+    const result = await withBusy(() => getDesktopApi().restoreLatestKnowledgeBackup(), "最近备份已恢复") as KnowledgeBackupResult | null;
+    if (!result) {
+      return;
+    }
+    setOperationResult({
+      title: "最近备份已恢复",
+      message: "当前知识库、运行记录和日志已从最近备份恢复。",
+      paths: buildResultPaths([{ label: "来源备份", path: result.backup_dir }]),
+      metric_label: "恢复目录数",
+      metric_value: result.restored_dir_count ?? 0
+    });
   }
 
   function confirmDestructive(message: string): boolean {
@@ -1219,6 +1357,12 @@ function App() {
   function confirmDeleteAllUserData(): boolean {
     const value = window.prompt("彻底删除会移除知识库、原始记录、运行记录、日志、导出和备份。请输入“确认删除”继续。");
     return value === "确认删除";
+  }
+
+  function copyText(value: string) {
+    void navigator.clipboard?.writeText(value);
+    setNotice("路径已复制。");
+    setNoticeKind("info");
   }
 
   async function handleImport(sourceApp?: string) {
@@ -1412,6 +1556,14 @@ function App() {
           />
         )}
 
+        {reviewUndo && (
+          <ReviewUndoBanner
+            status={reviewUndo.review_status}
+            onUndo={() => void undoLastReview()}
+            onDismiss={() => setReviewUndo(null)}
+          />
+        )}
+
         {isFixtureProvider(state.aiProvider) && (
           <FixtureModeBanner onGoSettings={() => setActive("settings")} />
         )}
@@ -1427,13 +1579,17 @@ function App() {
             sourceApp={state.sourceApp}
             connectors={state.connectors}
             aiProvider={state.aiProvider}
+            vaultRoot={state.vaultRoot}
             pipeline={pipeline}
             importPath={`raw/imports/${state.sourceApp}`}
             isEmptyVault={state.atoms.length === 0}
+            onboardingCompleted={onboardingCompleted}
             productGuideDismissed={productGuideDismissed}
+            onCompleteOnboarding={completeOnboarding}
             onDismissProductGuide={dismissProductGuide}
             onGoPending={() => setActive("pending")}
             onGoLibrary={() => goToLibrary()}
+            onChooseVault={() => void withBusy(() => getDesktopApi().chooseVault(), "知识库位置已更新")}
             onImport={(source) => void handleImport(source)}
             onImportBlocked={(message) => {
               setNotice(message);
@@ -1467,17 +1623,21 @@ function App() {
             busy={busy}
             focusAtomIds={libraryFocusAtomIds}
             recentlyApprovedIds={recentlyApprovedIds}
+            operationResult={operationResult}
             onClearFocus={() => setLibraryFocusAtomIds([])}
+            onClearOperationResult={() => setOperationResult(null)}
             onSelect={(atomId) => { setSelectedId(atomId); setActive("detail"); }}
             onMerge={(atomId, targetId) => withBusy(() => getDesktopApi().updateAtom({ atom_id: atomId, review_status: "merged", merged_into: targetId }), "知识已合并")}
-            onExport={() => withBusy(() => getDesktopApi().exportKnowledgeMarkdown(), "Markdown 导出完成")}
-            onObsidian={() => withBusy(() => getDesktopApi().ensureObsidianCompatibility(), "Obsidian 索引已更新")}
-            onBackup={() => withBusy(() => getDesktopApi().backupKnowledge(), "知识库备份已创建")}
+            onGoImport={() => setActive("import")}
+            onExport={() => void handleKnowledgeExport()}
+            onObsidian={() => void handleObsidianIndex()}
+            onBackup={() => void handleKnowledgeBackup()}
             onRestore={() => {
               if (confirmDestructive("恢复最近备份会覆盖当前知识库、运行记录和日志。确认继续？")) {
-                void withBusy(() => getDesktopApi().restoreLatestKnowledgeBackup(), "最近备份已恢复");
+                void handleKnowledgeRestore();
               }
             }}
+            onOpenVaultPath={(vaultPath) => void withBusy(() => getDesktopApi().showVaultPath({ vault_path: vaultPath }), "已打开本地路径")}
           />
         )}
         {active === "ask" && (
@@ -1536,6 +1696,7 @@ function App() {
             onSelect={(atomId) => { setSelectedId(atomId); setActive("detail"); }}
             onInlineReview={(input) => void handleAtomReview(input, { stayOnList: true })}
             onClearImportBatch={() => setImportBatchAtomIds([])}
+            onGoImport={() => setActive("import")}
             onGoLibrary={() => goToLibrary()}
           />
         )}
@@ -1546,6 +1707,8 @@ function App() {
             busy={busy}
             onUpdate={(input) => withBusy(() => getDesktopApi().updateAtom(input), "知识已更新")}
             onReview={(input) => void handleAtomReview(input)}
+            onOpenVaultPath={(vaultPath) => void withBusy(() => getDesktopApi().showVaultPath({ vault_path: vaultPath }), "已打开本地路径")}
+            onCopyText={copyText}
           />
         )}
         {active === "settings" && <SettingsPanel state={state} busy={busy} onSave={(input) => withBusy(() => getDesktopApi().saveSessionConfig(input), "会话配置已保存")} onCheckUpdates={() => withBusy(() => getDesktopApi().checkForUpdates(), "更新检查完成")} />}
@@ -1601,6 +1764,27 @@ function ReviewSuccessBanner({
   );
 }
 
+function ReviewUndoBanner({
+  status,
+  onUndo,
+  onDismiss
+}: {
+  status: ReviewStatus;
+  onUndo: () => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <div className="reviewUndoBanner">
+      <PackageCheck size={18} />
+      <span>审查状态已变更。原状态为「{reviewStatusLabel(status)}」，可撤销本次操作。</span>
+      <div className="reviewSuccessActions">
+        <button className="secondary" onClick={onUndo} title="恢复到上一次审查状态">撤销</button>
+        <button className="iconOnly" onClick={onDismiss} title="关闭"><X size={16} /></button>
+      </div>
+    </div>
+  );
+}
+
 function ProductGuideCard({ onDismiss }: { onDismiss: () => void }) {
   return (
     <div className="productGuideCard">
@@ -1613,6 +1797,51 @@ function ProductGuideCard({ onDismiss }: { onDismiss: () => void }) {
         <li>在「待确认」审查每条候选，批准后才进入正式库</li>
         <li>在「知识库」搜索、导出、同步 Obsidian，长期使用已批准知识</li>
       </ul>
+    </div>
+  );
+}
+
+function OnboardingCard({
+  vaultRoot,
+  sourceApp,
+  aiProvider,
+  onChooseVault,
+  onGoSettings,
+  onComplete
+}: {
+  vaultRoot: string;
+  sourceApp: string;
+  aiProvider: string;
+  onChooseVault: () => void;
+  onGoSettings: () => void;
+  onComplete: () => void;
+}) {
+  return (
+    <div className="onboardingBanner">
+      <div className="onboardingHead">
+        <strong>首次使用：先确认本地知识库</strong>
+        <button className="iconOnly firstTimeBannerClose" onClick={onComplete} title="使用当前默认配置"><X size={16} /></button>
+      </div>
+      <div className="onboardingSteps">
+        <div className="onboardingStep active">
+          <span className="stepNumber">1</span>
+          <div><strong>知识库位置</strong><small>{compactPath(vaultRoot)}</small></div>
+        </div>
+        <div className="onboardingStep active">
+          <span className="stepNumber">2</span>
+          <div><strong>默认来源</strong><small>{sourceApp || "未启用"}</small></div>
+        </div>
+        <div className="onboardingStep active">
+          <span className="stepNumber">3</span>
+          <div><strong>AI 模式</strong><small>{aiProviderLabel(aiProvider)}</small></div>
+        </div>
+      </div>
+      <div className="onboardingActions">
+        <button className="secondary" onClick={onChooseVault}><FolderOpen size={16} />选择知识库位置</button>
+        <button className="secondary" onClick={onGoSettings}><Settings size={16} />配置 AI</button>
+        <button className="primary" onClick={onComplete}><Check size={16} />使用当前配置</button>
+      </div>
+      <p className="hintText">跳过后将使用当前本地 vault、默认来源和当前 AI 模式；之后仍可在左侧或设置页修改。</p>
     </div>
   );
 }
@@ -1759,13 +1988,17 @@ function ImportPanel({
   sourceApp,
   connectors,
   aiProvider,
+  vaultRoot,
   pipeline,
   importPath,
   isEmptyVault,
+  onboardingCompleted,
   productGuideDismissed,
+  onCompleteOnboarding,
   onDismissProductGuide,
   onGoPending,
   onGoLibrary,
+  onChooseVault,
   onImport,
   onImportBlocked,
   onRetryImport,
@@ -1777,13 +2010,17 @@ function ImportPanel({
   sourceApp: string;
   connectors: SourceConnectorView[];
   aiProvider: string;
+  vaultRoot: string;
   pipeline: PipelineState;
   importPath: string;
   isEmptyVault: boolean;
+  onboardingCompleted: boolean;
   productGuideDismissed: boolean;
+  onCompleteOnboarding: () => void;
   onDismissProductGuide: () => void;
   onGoPending: () => void;
   onGoLibrary: () => void;
+  onChooseVault: () => void;
   onImport: (sourceApp: string) => void;
   onImportBlocked: (message: string) => void;
   onRetryImport: () => void;
@@ -1830,7 +2067,18 @@ function ImportPanel({
           <strong>第一步：导入你的对话或随笔文件</strong>
           选择 AI 聊天导出文件后，系统会自动标准化、提炼候选知识，并进入「待确认」等你审查。
         </FirstTimeBanner>
-        {isEmptyVault && !productGuideDismissed && <ProductGuideCard onDismiss={onDismissProductGuide} />}
+        {isEmptyVault && !onboardingCompleted ? (
+          <OnboardingCard
+            vaultRoot={vaultRoot}
+            sourceApp={resolvedImportSource || sourceApp}
+            aiProvider={aiProvider}
+            onChooseVault={onChooseVault}
+            onGoSettings={onGoSettings}
+            onComplete={onCompleteOnboarding}
+          />
+        ) : (
+          isEmptyVault && !productGuideDismissed && <ProductGuideCard onDismiss={onDismissProductGuide} />
+        )}
         <SectionHeading
           title="导入聊天文件"
           hint="选择导出文件后自动完成标准化与 AI 提炼，无需再去「运行」页手动触发。"
@@ -1908,12 +2156,15 @@ function ImportPanel({
         </div>
       </section>
       <section className="panel">
-        <SectionHeading
-          title="高级：仅重新标准化"
-          hint="文件已在导入目录但未处理时使用，不会重新选文件。"
-          help="只运行 P1 标准化，不触发 AI 提炼。一般导入按钮已包含此步骤。"
-        />
-        <button className="secondary" onClick={onRunNormalize} disabled={busy} title="对导入目录中已有文件重新运行标准化"><Play size={16} /><span>仅运行标准化</span></button>
+        <details className="runAdvanced">
+          <summary>高级：仅重新标准化</summary>
+          <SectionHeading
+            title="仅重新标准化"
+            hint="文件已在导入目录但未处理时使用，不会重新选文件，也不会生成待确认知识。"
+            help="只运行 P1 标准化，不触发 AI 提炼。一般导入按钮已包含此步骤。"
+          />
+          <button className="secondary" onClick={onRunNormalize} disabled={busy} title="对导入目录中已有文件重新运行标准化"><Play size={16} /><span>仅运行标准化</span></button>
+        </details>
       </section>
     </div>
   );
@@ -2039,9 +2290,9 @@ function RunPanel({
             title="立即处理导入目录中所有新文件，生成候选后去「待确认」审查"
           >
             <Play size={16} />
-            <span>{busy ? "正在处理..." : "立即运行"}</span>
+            <span>{busy ? "正在处理..." : "处理导入目录中的新文件"}</span>
           </button>
-          <HintText>现在处理导入目录里所有新文件；完成后去「待确认」逐条审查</HintText>
+          <HintText>处理 raw/imports 里尚未处理的新文件；完成后去「待确认」逐条审查</HintText>
         </div>
 
         {lastRunResult && (
@@ -2139,26 +2390,34 @@ function LibraryPanel({
   busy,
   focusAtomIds,
   recentlyApprovedIds,
+  operationResult,
   onClearFocus,
+  onClearOperationResult,
   onSelect,
   onMerge,
+  onGoImport,
   onExport,
   onObsidian,
   onBackup,
-  onRestore
+  onRestore,
+  onOpenVaultPath
 }: {
   atoms: KnowledgeAtomDocument[];
   knowledge: KnowledgeLibraryView;
   busy: boolean;
   focusAtomIds: string[];
   recentlyApprovedIds: string[];
+  operationResult: OperationResultCardState | null;
   onClearFocus: () => void;
+  onClearOperationResult: () => void;
   onSelect: (atomId: string) => void;
   onMerge: (atomId: string, targetId: string) => void;
+  onGoImport: () => void;
   onExport: () => void;
   onObsidian: () => void;
   onBackup: () => void;
   onRestore: () => void;
+  onOpenVaultPath: (vaultPath: string) => void;
 }) {
   const [query, setQuery] = useState("");
   const [sourceApp, setSourceApp] = useState("");
@@ -2184,6 +2443,16 @@ function LibraryPanel({
     const focused = base.filter((item) => focusSet.has(item.atom.atom_id));
     return focused.length > 0 ? focused : base;
   }, [atoms, focusAtomIds, focusSet, project, query, sourceApp, status, tag, type]);
+
+  function clearFilters() {
+    setQuery("");
+    setSourceApp("");
+    setType("");
+    setProject("");
+    setTag("");
+    setStatus("approved");
+    onClearFocus();
+  }
 
   return (
     <div className="libraryLayout">
@@ -2241,6 +2510,13 @@ function LibraryPanel({
           <button className="secondary" onClick={onBackup} disabled={busy} title="创建知识库完整备份到本地"><HardDriveDownload size={16} />备份</button>
           <button className="secondary" onClick={onRestore} disabled={busy} title="从最近一次备份恢复知识库"><RefreshCw size={16} />恢复最近备份</button>
         </div>
+        {operationResult && (
+          <OperationResultCard
+            result={operationResult}
+            onOpenVaultPath={onOpenVaultPath}
+            onDismiss={onClearOperationResult}
+          />
+        )}
       </section>
 
       <section className="panel libraryResults">
@@ -2265,8 +2541,15 @@ function LibraryPanel({
           ))}
           {filtered.length === 0 && (
             <div className="emptyState">
-              <p>已批准的知识都在这里，可搜索、导出、同步 Obsidian。</p>
-              <p className="muted">新导入的内容会先进「待确认」，你批准后才出现在这里。</p>
+              <p>{atoms.length === 0 ? "当前还没有知识。" : "当前筛选条件下没有匹配的知识。"}</p>
+              <p className="muted">{atoms.length === 0 ? "先导入文件并批准候选知识，批准后会出现在这里。" : "可以清除筛选，或换一个关键词重新搜索。"}</p>
+              <div className="actions">
+                {atoms.length === 0 ? (
+                  <button className="primary" onClick={onGoImport}><FileInput size={16} />去导入</button>
+                ) : (
+                  <button className="secondary" onClick={clearFilters}><RefreshCw size={16} />清除筛选</button>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -2419,6 +2702,43 @@ function AskPanel({
           </div>
         </section>
       )}
+    </div>
+  );
+}
+
+function OperationResultCard({
+  result,
+  onOpenVaultPath,
+  onDismiss
+}: {
+  result: OperationResultCardState;
+  onOpenVaultPath: (vaultPath: string) => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <div className="operationResultCard">
+      <div className="operationResultHead">
+        <div>
+          <strong>{result.title}</strong>
+          <span>{result.message}</span>
+        </div>
+        <button className="iconOnly" onClick={onDismiss} title="关闭结果"><X size={16} /></button>
+      </div>
+      {result.metric_label && (
+        <div className="operationMetric"><span>{result.metric_label}</span><strong>{result.metric_value ?? 0}</strong></div>
+      )}
+      <div className="operationPathList">
+        {result.paths.map((item) => (
+          <div className="operationPathRow" key={`${item.label}-${item.path}`}>
+            <span>{item.label}</span>
+            <code>{item.path}</code>
+            <button className="secondary" onClick={() => onOpenVaultPath(item.path)} title="在系统文件夹中打开">
+              <FolderOpen size={16} />
+              打开
+            </button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -2667,6 +2987,7 @@ function PendingPanel({
   onSelect,
   onInlineReview,
   onClearImportBatch,
+  onGoImport,
   onGoLibrary
 }: {
   atoms: KnowledgeAtomDocument[];
@@ -2679,6 +3000,7 @@ function PendingPanel({
   onSelect: (atomId: string) => void;
   onInlineReview: (input: AtomUpdateInput) => void;
   onClearImportBatch: () => void;
+  onGoImport: () => void;
   onGoLibrary: () => void;
 }) {
   const [statusFilter, setStatusFilter] = useState<ReviewStatus>("pending");
@@ -2874,12 +3196,19 @@ function PendingPanel({
           <div className="emptyState">
             <p>
               {statusFilter === "pending"
-                ? "AI 生成的候选知识需要你确认后才会进入正式库，避免错误内容自动入库。"
+                ? (atoms.length === 0 ? "当前还没有导入内容。" : "当前没有待确认知识。")
                 : `当前没有「${statusTabs.find((tab) => tab.key === statusFilter)?.label ?? statusFilter}」状态的知识。`}
             </p>
             {statusFilter === "pending" && (
-              <p className="muted">点击「导入」选择文件，系统会自动提炼候选；批准后可在「知识库」搜索使用。</p>
+              <p className="muted">{atoms.length === 0 ? "点击「导入」选择文件，系统会自动提炼候选。" : "全部候选已处理完毕，已批准内容可在知识库搜索和提问。"}</p>
             )}
+            <div className="actions">
+              {atoms.length === 0 ? (
+                <button className="primary" onClick={onGoImport}><FileInput size={16} />去导入</button>
+              ) : (
+                <button className="secondary" onClick={onGoLibrary}><BookOpenCheck size={16} />去知识库</button>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -2892,13 +3221,17 @@ function DetailPanel({
   atoms,
   busy,
   onUpdate,
-  onReview
+  onReview,
+  onOpenVaultPath,
+  onCopyText
 }: {
   document: KnowledgeAtomDocument;
   atoms: KnowledgeAtomDocument[];
   busy: boolean;
   onUpdate: (input: AtomUpdateInput) => void;
   onReview: (input: AtomUpdateInput) => void;
+  onOpenVaultPath: (vaultPath: string) => void;
+  onCopyText: (text: string) => void;
 }) {
   const [title, setTitle] = useState(document.atom.title);
   const [type, setType] = useState<KnowledgeAtomType>(document.atom.type);
@@ -2932,7 +3265,33 @@ function DetailPanel({
         <label>合并到<select value={mergedInto} onChange={(event) => setMergedInto(event.target.value)}><option value="">不合并</option>{atoms.filter((item) => item.atom.atom_id !== document.atom.atom_id).map((item) => <option key={item.atom.atom_id} value={item.atom.atom_id}>{item.atom.title}</option>)}</select></label>
       </div>
       <label className="fullField">内容<textarea value={content} onChange={(event) => setContent(event.target.value)} /></label>
-      <div className="evidence"><strong>证据</strong><p>{document.atom.evidence}</p><small>{document.atom.source_raw_paths.join(", ")}</small></div>
+      <div className="evidence sourceEvidence">
+        <strong>引用来源</strong>
+        <p>{document.atom.evidence || "暂无证据摘录。"}</p>
+        <div className="sourceCitationList">
+          {document.atom.source_raw_paths.length > 0 ? document.atom.source_raw_paths.map((rawPath, index) => (
+            <div className="sourceCitationCard" key={`${rawPath}-${index}`}>
+              <span>{document.atom.source_app} · 记录 {document.atom.source_record_ids[index] ?? document.atom.source_record_ids[0] ?? "unknown"}</span>
+              <code>{rawPath}</code>
+              <div className="sourceCitationActions">
+                <button className="secondary" onClick={() => onOpenVaultPath(rawPath)} disabled={busy} title="在系统文件夹中打开原始文件">
+                  <FolderOpen size={16} />
+                  打开
+                </button>
+                <button className="secondary" onClick={() => onCopyText(rawPath)} disabled={busy} title="复制 vault 内相对路径">
+                  <FileText size={16} />
+                  复制路径
+                </button>
+              </div>
+            </div>
+          )) : (
+            <div className="sourceCitationCard">
+              <span>{document.atom.source_app} · 来源路径不可用</span>
+              <small>原始文件可能已被清理，但证据摘录仍保留在知识卡片中。</small>
+            </div>
+          )}
+        </div>
+      </div>
       <div className="actions">
         <button className="secondary" onClick={() => onUpdate(baseInput)} disabled={busy} title="保存标题、类型、标签和正文的修改"><SquarePen size={16} />保存</button>
         <button className="primary" onClick={() => onReview({ ...baseInput, review_status: "approved" })} disabled={busy} title="批准后将进入正式知识库，可在知识库搜索和使用"><Check size={16} />批准</button>
@@ -3155,6 +3514,8 @@ function Metric({ label, value }: { label: string; value: number }) {
 
 function reviewStatusLabel(status?: ReviewStatus): string {
   switch (status) {
+    case "pending":
+      return "待确认";
     case "approved":
       return "已批准";
     case "rejected":
@@ -3224,6 +3585,12 @@ function scoreKnowledgeAtomForQuestion(item: KnowledgeAtomDocument, terms: strin
     }
   }
   return score;
+}
+
+function buildResultPaths(items: Array<{ label: string; path: string | undefined }>): Array<{ label: string; path: string }> {
+  return items
+    .filter((item): item is { label: string; path: string } => Boolean(item.path && item.path.trim()))
+    .map((item) => ({ label: item.label, path: item.path }));
 }
 
 function filterKnowledgeItems(

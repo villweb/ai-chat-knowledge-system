@@ -662,6 +662,25 @@ nav {
   color: #1d4f38;
 }
 
+.reviewUndoBanner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border: 1px solid #e8d7a6;
+  border-radius: 8px;
+  background: #fffaf0;
+  color: #5a4a1f;
+}
+
+.reviewUndoBanner > span {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .reviewSuccessBanner strong {
   display: block;
   font-size: 14px;
@@ -1676,6 +1695,54 @@ nav {
   overflow-wrap: anywhere;
 }
 
+.sourceEvidence {
+  gap: 10px;
+}
+
+.sourceCitationList {
+  display: grid;
+  gap: 9px;
+}
+
+.sourceCitationCard {
+  display: grid;
+  gap: 7px;
+  padding: 10px;
+  border: 1px solid #dce3e0;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.sourceCitationCard span,
+.sourceCitationCard small {
+  color: #64736e;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.sourceCitationCard span {
+  color: #23724f;
+  font-weight: 700;
+}
+
+.sourceCitationCard code,
+.operationPathRow code {
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #30423c;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.sourceCitationActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;
@@ -1938,6 +2005,72 @@ nav {
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 14px;
+}
+
+.operationResultCard {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 13px;
+  border: 1px solid #b9dcc4;
+  border-radius: 8px;
+  background: #f4fbf6;
+}
+
+.operationResultHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.operationResultHead strong,
+.operationResultHead span {
+  display: block;
+}
+
+.operationResultHead strong {
+  color: #1d4f38;
+  font-size: 14px;
+}
+
+.operationResultHead span {
+  margin-top: 4px;
+  color: #51645d;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.operationMetric {
+  display: inline-grid;
+  grid-template-columns: auto auto;
+  gap: 8px;
+  justify-self: start;
+  align-items: center;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: #e2f5e6;
+  color: #1d6333;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.operationPathList {
+  display: grid;
+  gap: 8px;
+}
+
+.operationPathRow {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.operationPathRow span {
+  color: #34443f;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .duplicateList,
@@ -2320,9 +2453,19 @@ nav {
 	    grid-template-columns: 1fr;
 	  }
 
-  .filterBar {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+	  .filterBar {
+	    grid-template-columns: repeat(2, minmax(0, 1fr));
+	  }
+
+	  .operationPathRow {
+	    grid-template-columns: 1fr;
+	  }
+
+	  .reviewUndoBanner,
+	  .operationResultHead {
+	    align-items: flex-start;
+	    flex-direction: column;
+	  }
 
   .filterField--search {
     grid-column: 1 / -1;

@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("desktopApi", {
   getState: () => ipcRenderer.invoke("app:get-state"),
   chooseVault: () => ipcRenderer.invoke("vault:choose"),
+  showVaultPath: (input) => ipcRenderer.invoke("vault:show-path", input),
   chooseImportFiles: (sourceApp) => ipcRenderer.invoke("import:choose-files", sourceApp),
   retryImport: () => ipcRenderer.invoke("import:retry"),
   runImport: () => ipcRenderer.invoke("workflow:run-import"),
