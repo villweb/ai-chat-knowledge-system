@@ -1655,14 +1655,25 @@ nav {
   color: #33418d;
 }
 
-/* 筛选项统一布局：多行网格、标签在上、控件等高 */
+/* 搜索独占一行，仅展示有实际选择空间的筛选项 */
 .filterBar {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
-  gap: 10px 12px;
+  gap: 12px;
   width: 100%;
   min-width: 0;
   margin: 12px 0;
+}
+
+.facetFilters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px 12px;
+  min-width: 0;
+}
+
+.facetFilters:has(> .filterField:only-child) {
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 320px;
 }
 
 .filterField {
@@ -1670,10 +1681,6 @@ nav {
   gap: 6px;
   min-width: 0;
   margin: 0;
-}
-
-.filterField--wide {
-  grid-column: 1 / -1;
 }
 
 .filterLabel {
@@ -1744,12 +1751,6 @@ nav {
 .filterBar .search {
   min-height: var(--btn-height-sm);
   height: var(--btn-height-sm);
-}
-
-@media (min-width: 720px) {
-  .filterField--search {
-    grid-column: span 2;
-  }
 }
 
 .atomList,
@@ -2824,7 +2825,7 @@ nav {
 	    grid-template-columns: 1fr;
 	  }
 
-	  .filterBar {
+	  .facetFilters {
 	    grid-template-columns: repeat(2, minmax(0, 1fr));
 	  }
 
@@ -2837,10 +2838,6 @@ nav {
 	    align-items: flex-start;
 	    flex-direction: column;
 	  }
-
-  .filterField--search {
-    grid-column: 1 / -1;
-  }
 
   .metricGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2890,7 +2887,7 @@ nav {
     flex: 1 1 120px;
   }
 
-  .filterBar {
+  .facetFilters {
     grid-template-columns: 1fr;
   }
 

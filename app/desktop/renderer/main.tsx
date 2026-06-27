@@ -2548,6 +2548,13 @@ function LibraryPanel({
   const showRecentHighlight = focusAtomIds.length > 0 || recentlyApprovedIds.length > 0;
   const approvedCount = atoms.filter((item) => item.atom.review_status === "approved").length;
   const pendingCount = atoms.filter((item) => item.atom.review_status === "pending").length;
+  const hasFacetFilters = [
+    knowledge.facets.source_apps,
+    knowledge.facets.types,
+    knowledge.facets.projects,
+    knowledge.facets.tags,
+    knowledge.facets.statuses
+  ].some((items) => items.length > 1);
 
   useEffect(() => {
     if (focusAtomIds.length > 0) {
@@ -2599,30 +2606,42 @@ function LibraryPanel({
           </div>
         </div>
         <div className="filterBar">
-          <label className="filterField filterField--wide filterField--search">
+          <label className="filterField">
             <span className="filterLabel">搜索</span>
-            <span className="search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索标题、正文、证据、标签" /></span>
+            <span className="search"><Search size={16} /><input type="search" name="knowledge-query" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索标题、正文、证据、标签" /></span>
           </label>
-          <label className="filterField">
-            <span className="filterLabel"><Filter size={15} />来源</span>
-            <select value={sourceApp} onChange={(event) => setSourceApp(event.target.value)}><option value="">全部</option>{knowledge.facets.source_apps.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select>
-          </label>
-          <label className="filterField">
-            <span className="filterLabel"><Filter size={15} />类型</span>
-            <select value={type} onChange={(event) => setType(event.target.value)}><option value="">全部</option>{knowledge.facets.types.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select>
-          </label>
-          <label className="filterField">
-            <span className="filterLabel"><Filter size={15} />项目</span>
-            <select value={project} onChange={(event) => setProject(event.target.value)}><option value="">全部</option>{knowledge.facets.projects.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select>
-          </label>
-          <label className="filterField">
-            <span className="filterLabel"><Filter size={15} />标签</span>
-            <select value={tag} onChange={(event) => setTag(event.target.value)}><option value="">全部</option>{knowledge.facets.tags.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select>
-          </label>
-          <label className="filterField">
-            <span className="filterLabel"><Filter size={15} />状态</span>
-            <select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">全部</option>{knowledge.facets.statuses.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select>
-          </label>
+          {hasFacetFilters && <div className="facetFilters">
+            {knowledge.facets.source_apps.length > 1 && (
+              <label className="filterField">
+                <span className="filterLabel"><Filter size={15} />来源</span>
+                <select name="knowledge-source" value={sourceApp} onChange={(event) => setSourceApp(event.target.value)}><option value="">全部来源</option>{knowledge.facets.source_apps.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select>
+              </label>
+            )}
+            {knowledge.facets.types.length > 1 && (
+              <label className="filterField">
+                <span className="filterLabel"><Filter size={15} />类型</span>
+                <select name="knowledge-type" value={type} onChange={(event) => setType(event.target.value)}><option value="">全部类型</option>{knowledge.facets.types.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select>
+              </label>
+            )}
+            {knowledge.facets.projects.length > 1 && (
+              <label className="filterField">
+                <span className="filterLabel"><Filter size={15} />项目</span>
+                <select name="knowledge-project" value={project} onChange={(event) => setProject(event.target.value)}><option value="">全部项目</option>{knowledge.facets.projects.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select>
+              </label>
+            )}
+            {knowledge.facets.tags.length > 1 && (
+              <label className="filterField">
+                <span className="filterLabel"><Filter size={15} />标签</span>
+                <select name="knowledge-tag" value={tag} onChange={(event) => setTag(event.target.value)}><option value="">全部标签</option>{knowledge.facets.tags.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select>
+              </label>
+            )}
+            {knowledge.facets.statuses.length > 1 && (
+              <label className="filterField">
+                <span className="filterLabel"><Filter size={15} />状态</span>
+                <select name="knowledge-status" value={status} onChange={(event) => setStatus(event.target.value)}><option value="">全部状态</option>{knowledge.facets.statuses.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select>
+              </label>
+            )}
+          </div>}
         </div>
         <div className="libraryToolbar">
           <button className="secondary" onClick={onExport} disabled={busy || approvedCount === 0} title={approvedCount === 0 ? "暂无已批准知识可导出" : "将全部已批准知识导出为 Markdown 文件"}><Download size={16} />导出已批准 Markdown</button>
