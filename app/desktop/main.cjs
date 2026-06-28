@@ -54,6 +54,7 @@ let pipelinePhase = "idle";
 let pipelineSubstep = null;
 let pipelineError = null;
 let lastPipelineRetry = null;
+let updateInstallPromptOpen = false;
 
 function getAutoUpdater() {
   return require("electron-updater").autoUpdater;
@@ -82,14 +83,29 @@ function createWindow() {
   }
 }
 
-app.whenReady().then(async () => {
-  state.vaultRoot = await resolveInitialVaultRoot();
-  applyEnabledConnectorDefaults();
-  configureAutoUpdater();
-  registerIpc();
-  createWindow();
-  startAutomationTimer();
-});
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    const win = BrowserWindow.getAllWindows()[0];
+    if (win) {
+      if (win.isMinimized()) {
+        win.restore();
+      }
+      win.show();
+      win.focus();
+    }
+  });
+
+  app.whenReady().then(async () => {
+    state.vaultRoot = await resolveInitialVaultRoot();
+    applyEnabledConnectorDefaults();
+    configureAutoUpdater();
+    registerIpc();
+    createWindow();
+    startAutomationTimer();
+  });
+}
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
@@ -685,8 +701,33 @@ function resolveVaultScopedPath(vaultPath) {
 
 function configureAutoUpdater() {
   const autoUpdater = getAutoUpdater();
-  autoUpdater.autoDownload = false;
+  autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = false;
+  autoUpdater.autoRunAppAfterInstall = true;
+  autoUpdater.on("update-downloaded", async (info) => {
+    if (updateInstallPromptOpen) {
+      return;
+    }
+
+    updateInstallPromptOpen = true;
+    try {
+      const result = await dialog.showMessageBox({
+        type: "question",
+        title: "更新已准备好",
+        message: info.version ? `新版本 ${info.version} 已下载完成` : "新版本已下载完成",
+        detail: "确认后将退出当前版本、安装更新并自动打开新版。本地知识库数据不会被删除。",
+        buttons: ["退出并更新", "稍后"],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true
+      });
+      if (result.response === 0) {
+        autoUpdater.quitAndInstall(false, true);
+      }
+    } finally {
+      updateInstallPromptOpen = false;
+    }
+  });
   const updateUrl = process.env[releaseInfo.update_url_env];
   autoUpdater.setFeedURL({ provider: "generic", url: updateUrl || releaseInfo.update_url, channel: releaseInfo.update_channel });
 }
