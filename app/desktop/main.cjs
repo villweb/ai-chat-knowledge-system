@@ -14,6 +14,7 @@ const runtimeRoot = app.isPackaged ? path.join(process.resourcesPath, "app.asar.
 const assetRoot = app.isPackaged ? app.getAppPath() : devRoot;
 const sourceApps = ["codex", "cursor", "deepseek", "doubao", "workbuddy"];
 const AUTOMATION_CHECK_MS = 30_000;
+const AUTO_COLLECTION_CHECK_MS = 60_000;
 const SESSION_CONFIG_PATH = "data/runtime/desktop-session.json";
 const APP_SETTINGS_FILE = "desktop-app-settings.json";
 const releaseInfo = {
@@ -45,15 +46,19 @@ const state = {
   events: []
 };
 let automationTimer = null;
+let autoCollectionTimer = null;
 let automationRunning = false;
+let autoCollectionRunning = false;
 let pendingAutomationRun = null;
 let lastAutomationDecision = null;
+let lastAutoCollectionScanAt = 0;
 let sessionConfigLoaded = false;
 // 桌面端流水线状态，供界面展示当前处理阶段与子步骤
 let pipelinePhase = "idle";
 let pipelineSubstep = null;
 let pipelineError = null;
 let lastPipelineRetry = null;
+let updateInstallPromptOpen = false;
 
 function getAutoUpdater() {
   return require("electron-updater").autoUpdater;
@@ -82,14 +87,30 @@ function createWindow() {
   }
 }
 
-app.whenReady().then(async () => {
-  state.vaultRoot = await resolveInitialVaultRoot();
-  applyEnabledConnectorDefaults();
-  configureAutoUpdater();
-  registerIpc();
-  createWindow();
-  startAutomationTimer();
-});
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    const win = BrowserWindow.getAllWindows()[0];
+    if (win) {
+      if (win.isMinimized()) {
+        win.restore();
+      }
+      win.show();
+      win.focus();
+    }
+  });
+
+  app.whenReady().then(async () => {
+    state.vaultRoot = await resolveInitialVaultRoot();
+    applyEnabledConnectorDefaults();
+    configureAutoUpdater();
+    registerIpc();
+    createWindow();
+    startAutomationTimer();
+    startAutoCollectionTimer();
+  });
+}
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
@@ -111,6 +132,7 @@ function registerIpc() {
       ...state,
       apiKeyConfigured: state.apiKeyConfigured || privacy.secure_credentials.openai_compatible_saved,
       automation: await getAutomationState(),
+      autoCollection: await getAutoCollectionState(),
       connectors: await listConnectors(),
       atoms: await listAtoms(),
       knowledge: await getKnowledgeView({}),
@@ -417,6 +439,7 @@ function registerIpc() {
   ipcMain.handle("workflow:run-daily", async () => {
     pipelinePhase = "processing";
     try {
+      await runAutoCollectionBeforeDaily();
       const workflowResult = await runDailyWorkflow();
       const result = await buildDailyRunResult(workflowResult);
       pipelinePhase = result.pending_atom_count > 0 ? "waiting_review" : "done";
@@ -579,6 +602,16 @@ function registerIpc() {
   });
 
   ipcMain.handle("automation:list-history", async () => listDailyRunHistory());
+  ipcMain.handle("auto-collection:get-state", async () => getAutoCollectionState());
+  ipcMain.handle("auto-collection:save-settings", async (_event, input) => {
+    const result = await runScript("scripts/auto-source-collection.ts", ["save-settings", "--vault-root", state.vaultRoot], JSON.stringify(input));
+    if (!result.ok) {
+      throw new Error(result.stderr || "保存自动收集设置失败。");
+    }
+    pushEvent("auto_collection_settings_saved", "自动收集设置已保存。");
+    return getAutoCollectionState();
+  });
+  ipcMain.handle("auto-collection:run-now", async () => runAutoCollectionNow("manual"));
   ipcMain.handle("release:get-state", async () => getReleaseState());
   ipcMain.handle("release:check-for-updates", async () => checkForUpdates());
 
@@ -685,8 +718,33 @@ function resolveVaultScopedPath(vaultPath) {
 
 function configureAutoUpdater() {
   const autoUpdater = getAutoUpdater();
-  autoUpdater.autoDownload = false;
+  autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = false;
+  autoUpdater.autoRunAppAfterInstall = true;
+  autoUpdater.on("update-downloaded", async (info) => {
+    if (updateInstallPromptOpen) {
+      return;
+    }
+
+    updateInstallPromptOpen = true;
+    try {
+      const result = await dialog.showMessageBox({
+        type: "question",
+        title: "更新已准备好",
+        message: info.version ? `新版本 ${info.version} 已下载完成` : "新版本已下载完成",
+        detail: "确认后将退出当前版本、安装更新并自动打开新版。本地知识库数据不会被删除。",
+        buttons: ["退出并更新", "稍后"],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true
+      });
+      if (result.response === 0) {
+        autoUpdater.quitAndInstall(false, true);
+      }
+    } finally {
+      updateInstallPromptOpen = false;
+    }
+  });
   const updateUrl = process.env[releaseInfo.update_url_env];
   autoUpdater.setFeedURL({ provider: "generic", url: updateUrl || releaseInfo.update_url, channel: releaseInfo.update_channel });
 }
@@ -736,6 +794,20 @@ async function getAutomationState() {
     pending_run: pendingAutomationRun,
     last_decision: lastAutomationDecision
   };
+}
+
+async function getAutoCollectionState() {
+  const result = await runScript("scripts/auto-source-collection.ts", [
+    "get-state",
+    "--vault-root",
+    state.vaultRoot,
+    "--enabled",
+    getEnabledSourceApps().join(",")
+  ]);
+  if (!result.ok) {
+    throw new Error(result.stderr || "读取自动收集状态失败。");
+  }
+  return JSON.parse(result.stdout);
 }
 
 async function listDailyRunHistory() {
@@ -809,6 +881,17 @@ function startAutomationTimer() {
   void checkAutomation();
 }
 
+function startAutoCollectionTimer() {
+  if (autoCollectionTimer) {
+    clearInterval(autoCollectionTimer);
+  }
+
+  autoCollectionTimer = setInterval(() => {
+    void checkAutoCollection("interval");
+  }, AUTO_COLLECTION_CHECK_MS);
+  void checkAutoCollection("startup");
+}
+
 async function checkAutomation() {
   if (automationRunning || pendingAutomationRun) {
     return;
@@ -849,6 +932,7 @@ async function runAutomationDate(runDate, reason) {
   const runIdPrefix = `auto_daily_${runDate}_${Date.now()}`;
   try {
     pushEvent("automation_run_started", `开始自动每日沉淀：${runDate}`);
+    await runAutoCollectionBeforeDaily();
     const result = await runDailyWorkflow(runDate, runIdPrefix);
     pushEvent("automation_run_completed", `自动每日沉淀完成：${runDate}`);
     const automationState = await getAutomationState();
@@ -871,6 +955,121 @@ async function runAutomationDate(runDate, reason) {
       attempt_count: 0
     };
   }
+}
+
+async function checkAutoCollection(reason) {
+  if (autoCollectionRunning || automationRunning) {
+    return;
+  }
+
+  try {
+    const collectionState = await getAutoCollectionState();
+    if (!collectionState.settings.enabled) {
+      return;
+    }
+    if (reason === "startup" && !collectionState.settings.scan_on_startup) {
+      return;
+    }
+    const intervalMs = collectionState.settings.scan_interval_minutes * 60_000;
+    if (reason === "interval" && Date.now() - lastAutoCollectionScanAt < intervalMs) {
+      return;
+    }
+
+    await runAutoCollectionItems(collectionState.pending, reason);
+  } catch (error) {
+    pushEvent("auto_collection_failed", toErrorMessage(error));
+  }
+}
+
+async function runAutoCollectionBeforeDaily() {
+  const collectionState = await getAutoCollectionState();
+  if (!collectionState.settings.enabled || !collectionState.settings.scan_before_daily) {
+    return null;
+  }
+
+  return runAutoCollectionItems(collectionState.pending, "before_daily");
+}
+
+async function runAutoCollectionNow(reason) {
+  if (autoCollectionRunning) {
+    throw new Error("自动收集正在运行中。");
+  }
+
+  const collectionState = await getAutoCollectionState();
+  return runAutoCollectionItems(collectionState.pending, reason);
+}
+
+async function runAutoCollectionItems(items, reason) {
+  autoCollectionRunning = true;
+  lastAutoCollectionScanAt = Date.now();
+  try {
+    if (!items.length) {
+      await markAutoCollectionItems([]);
+      pushEvent("auto_collection_empty", "自动收集扫描完成，没有发现新增文件。");
+      return { scanned_file_count: 0, processed_file_count: 0, failed_file_count: 0, reason };
+    }
+
+    const groups = groupBySourceApp(items);
+    const processedItems = [];
+    let failedFileCount = 0;
+    pipelinePhase = "processing";
+    pipelineSubstep = "normalizing";
+    pipelineError = null;
+
+    for (const [sourceApp, sourceItems] of Object.entries(groups)) {
+      const rawPaths = sourceItems.map((item) => item.raw_path);
+      try {
+        const workflowResult = await runDailyWorkflow(undefined, undefined, {
+          uiManualImport: true,
+          copiedRawPaths: rawPaths,
+          sourceApp
+        });
+        const importSummary = parseScriptStdout(workflowResult.importResult);
+        const failedRawPaths = new Set((importSummary?.failures ?? []).map((failure) => failure.raw_path));
+        processedItems.push(...sourceItems.filter((item) => !failedRawPaths.has(item.raw_path)));
+        failedFileCount += importSummary?.failed_file_count ?? 0;
+      } catch (error) {
+        failedFileCount += sourceItems.length;
+        pushEvent("auto_collection_source_failed", `${sourceApp} 自动收集失败：${toErrorMessage(error)}`);
+      }
+    }
+
+    await markAutoCollectionItems(processedItems);
+    const atoms = await listAtoms();
+    const pendingCount = atoms.filter((item) => item.atom.review_status === "pending").length;
+    pipelineSubstep = null;
+    pipelinePhase = pendingCount > 0 ? "waiting_review" : "done";
+    pushEvent("auto_collection_completed", `自动收集完成：处理 ${processedItems.length} 个文件，失败 ${failedFileCount} 个。`);
+    return {
+      scanned_file_count: items.length,
+      processed_file_count: processedItems.length,
+      failed_file_count: failedFileCount,
+      pending_atom_count: pendingCount,
+      reason
+    };
+  } finally {
+    autoCollectionRunning = false;
+  }
+}
+
+async function markAutoCollectionItems(items) {
+  const result = await runScript(
+    "scripts/auto-source-collection.ts",
+    ["mark-processed", "--vault-root", state.vaultRoot],
+    JSON.stringify({ items })
+  );
+  if (!result.ok) {
+    throw new Error(result.stderr || "更新自动收集状态失败。");
+  }
+  return JSON.parse(result.stdout);
+}
+
+function groupBySourceApp(items) {
+  return items.reduce((groups, item) => {
+    groups[item.source_app] = groups[item.source_app] || [];
+    groups[item.source_app].push(item);
+    return groups;
+  }, {});
 }
 
 async function runDailyWorkflow(runDate, runIdPrefix, options = {}) {
@@ -1020,6 +1219,11 @@ function applyEnabledConnectorDefaults() {
 
 function isSourceEnabled(sourceApp) {
   return Boolean(state.enabledConnectors[sourceApp]);
+}
+
+function getEnabledSourceApps() {
+  applyEnabledConnectorDefaults();
+  return sourceApps.filter((sourceApp) => state.enabledConnectors[sourceApp]);
 }
 
 function ensureSourceEnabled(sourceApp) {

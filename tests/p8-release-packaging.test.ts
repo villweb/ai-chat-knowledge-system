@@ -90,6 +90,15 @@ test("P8 signing requirements are declared for release distribution", () => {
   assert.equal(win?.env_vars.includes("WIN_CSC_LINK"), true);
 });
 
+test("P8 desktop update confirms before replacing the running version", async () => {
+  const source = await readFile("app/desktop/main.cjs", "utf8");
+
+  assert.match(source, /requestSingleInstanceLock\(\)/);
+  assert.match(source, /autoUpdater\.on\("update-downloaded"/);
+  assert.match(source, /buttons: \["退出并更新", "稍后"\]/);
+  assert.match(source, /autoUpdater\.quitAndInstall\(false, true\)/);
+});
+
 test("P8 release workflow builds native installers on target operating systems", async () => {
   const workflow = YAML.parse(await readFile(".github/workflows/release-build.yml", "utf8")) as {
     jobs: { build: { strategy: { matrix: { include: Array<{ platform: string; os: string; script: string }> } } } };

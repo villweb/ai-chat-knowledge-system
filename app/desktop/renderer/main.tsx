@@ -131,6 +131,28 @@ interface DailyAutomationState {
   last_decision: DailyAutomationDecision | null;
 }
 
+interface AutoCollectionSettings {
+  enabled: boolean;
+  scan_interval_minutes: number;
+  scan_on_startup: boolean;
+  scan_before_daily: boolean;
+  updated_at: string;
+}
+
+interface AutoCollectionCandidate {
+  source_app: string;
+  raw_path: string;
+  signature: string;
+  detected_at: string;
+}
+
+interface AutoCollectionState {
+  settings: AutoCollectionSettings;
+  pending: AutoCollectionCandidate[];
+  processed_file_count: number;
+  last_scan_at: string;
+}
+
 interface KnowledgeFacetItem {
   value: string;
   count: number;
@@ -342,6 +364,7 @@ interface DesktopState {
   aiModel?: string;
   apiKeyConfigured: boolean;
   automation: DailyAutomationState;
+  autoCollection: AutoCollectionState;
   connectors: SourceConnectorView[];
   events: LogEvent[];
   atoms: KnowledgeAtomDocument[];
@@ -410,6 +433,9 @@ interface DesktopApi {
   skipAutomationRun(): Promise<DailyAutomationState>;
   rerunAutomationDate(input: { run_date: string }): Promise<DailyAutomationState>;
   listAutomationHistory(): Promise<DailyRunHistoryItem[]>;
+  getAutoCollectionState(): Promise<AutoCollectionState>;
+  saveAutoCollectionSettings(input: Partial<AutoCollectionSettings>): Promise<AutoCollectionState>;
+  runAutoCollectionNow(): Promise<unknown>;
   saveSessionConfig(input: SessionConfigInput): Promise<DesktopState>;
 }
 
@@ -524,6 +550,7 @@ function createPreviewDesktopApi(): DesktopApi {
     aiProvider: "fixture",
     apiKeyConfigured: false,
     automation: buildPreviewAutomation(),
+    autoCollection: buildPreviewAutoCollection(),
     connectors: buildPreviewConnectors(),
     events: [sampleLog],
     atoms: [sampleAtom, duplicateAtom],
@@ -742,6 +769,28 @@ function createPreviewDesktopApi(): DesktopApi {
     async listAutomationHistory() {
       return previewState.automation.history;
     },
+    async getAutoCollectionState() {
+      return previewState.autoCollection;
+    },
+    async saveAutoCollectionSettings(input) {
+      previewState.autoCollection = {
+        ...previewState.autoCollection,
+        settings: {
+          ...previewState.autoCollection.settings,
+          ...input,
+          updated_at: new Date().toISOString()
+        }
+      };
+      return previewState.autoCollection;
+    },
+    async runAutoCollectionNow() {
+      previewState.autoCollection = {
+        ...previewState.autoCollection,
+        pending: [],
+        last_scan_at: new Date().toISOString()
+      };
+      return { scanned_file_count: 1, processed_file_count: 1, failed_file_count: 0 };
+    },
     async saveSessionConfig(input) {
       previewState.sourceApp = input.sourceApp;
       previewState.aiProvider = input.aiProvider;
@@ -889,6 +938,26 @@ function buildPreviewKnowledge(items: KnowledgeAtomDocument[]): KnowledgeLibrary
       pending_atom_count: items.length,
       failed_run_count: 0
     }]
+  };
+}
+
+function buildPreviewAutoCollection(): AutoCollectionState {
+  return {
+    settings: {
+      enabled: false,
+      scan_interval_minutes: 5,
+      scan_on_startup: true,
+      scan_before_daily: true,
+      updated_at: new Date().toISOString()
+    },
+    pending: [{
+      source_app: "codex",
+      raw_path: "raw/imports/codex/preview.md",
+      signature: "preview",
+      detected_at: new Date().toISOString()
+    }],
+    processed_file_count: 0,
+    last_scan_at: ""
   };
 }
 
@@ -1666,7 +1735,17 @@ function App() {
         )}
 
         {active === "guide" && <GuidePanel state={state} counts={counts} onGoImport={() => setActive("import")} onGoPending={() => setActive("pending")} />}
-        {active === "sources" && <SourcesPanel connectors={state.connectors} sourceApp={state.sourceApp} busy={busy} onToggle={(sourceApp, enabled) => withBusy(() => getDesktopApi().setConnectorEnabled({ sourceApp, enabled }), "连接器状态已更新")} />}
+        {active === "sources" && (
+          <SourcesPanel
+            connectors={state.connectors}
+            sourceApp={state.sourceApp}
+            busy={busy}
+            autoCollection={state.autoCollection}
+            onToggle={(sourceApp, enabled) => withBusy(() => getDesktopApi().setConnectorEnabled({ sourceApp, enabled }), "连接器状态已更新")}
+            onSaveAutoCollectionSettings={(input) => withBusy(() => getDesktopApi().saveAutoCollectionSettings(input), "自动收集设置已更新")}
+            onRunAutoCollection={() => withBusy(() => getDesktopApi().runAutoCollectionNow(), "自动收集扫描完成，请到「待确认」查看新增候选。")}
+          />
+        )}
         {active === "import" && (
           <ImportPanel
             busy={busy}
@@ -2050,7 +2129,25 @@ function GuidePanel({
   );
 }
 
-function SourcesPanel({ connectors, sourceApp, busy, onToggle }: { connectors: SourceConnectorView[]; sourceApp: string; busy: boolean; onToggle: (sourceApp: string, enabled: boolean) => void }) {
+function SourcesPanel({
+  connectors,
+  sourceApp,
+  busy,
+  autoCollection,
+  onToggle,
+  onSaveAutoCollectionSettings,
+  onRunAutoCollection
+}: {
+  connectors: SourceConnectorView[];
+  sourceApp: string;
+  busy: boolean;
+  autoCollection: AutoCollectionState;
+  onToggle: (sourceApp: string, enabled: boolean) => void;
+  onSaveAutoCollectionSettings: (input: Partial<AutoCollectionSettings>) => void;
+  onRunAutoCollection: () => void;
+}) {
+  const pendingCount = autoCollection.pending.length;
+
   return (
     <section className="panel">
       <FirstTimeBanner section="sources">
@@ -2062,6 +2159,74 @@ function SourcesPanel({ connectors, sourceApp, busy, onToggle }: { connectors: S
         hint="启用后可在「导入」页选择对应平台的导出文件；预留来源尚未开放。"
         help="每个来源对应 raw/imports 下的子目录，只读取你手动放入的文件。"
       />
+      <div className="autoCollectionBox">
+        <div className="autoCollectionHeader">
+          <div>
+            <strong>自动收集</strong>
+            <span>应用打开时按间隔扫描已启用来源的导入目录，不读取浏览器 Cookie、不扫描全盘。</span>
+          </div>
+          <button type="button" className="secondary" onClick={onRunAutoCollection} disabled={busy}>
+            <RefreshCw size={16} />
+            <span>立即扫描</span>
+          </button>
+        </div>
+        <div className="formGrid autoCollectionGrid">
+          <label className="checkboxLabel">
+            <input
+              name="auto-collection-enabled"
+              type="checkbox"
+              checked={autoCollection.settings.enabled}
+              disabled={busy}
+              onChange={(event) => onSaveAutoCollectionSettings({ enabled: event.target.checked })}
+            />
+            <span>启用自动收集</span>
+          </label>
+          <label>
+            <FieldLabel help="应用运行时的扫描间隔，默认 5 分钟。">
+              扫描间隔（分钟）
+            </FieldLabel>
+            <input
+              name="auto-collection-interval"
+              type="number"
+              min={1}
+              max={1440}
+              value={autoCollection.settings.scan_interval_minutes}
+              disabled={busy}
+              onChange={(event) => {
+                const next = Number(event.target.value);
+                if (Number.isInteger(next) && next >= 1 && next <= 1440) {
+                  onSaveAutoCollectionSettings({ scan_interval_minutes: next });
+                }
+              }}
+            />
+          </label>
+          <label className="checkboxLabel">
+            <input
+              name="auto-collection-startup"
+              type="checkbox"
+              checked={autoCollection.settings.scan_on_startup}
+              disabled={busy}
+              onChange={(event) => onSaveAutoCollectionSettings({ scan_on_startup: event.target.checked })}
+            />
+            <span>启动时扫描一次</span>
+          </label>
+          <label className="checkboxLabel">
+            <input
+              name="auto-collection-before-daily"
+              type="checkbox"
+              checked={autoCollection.settings.scan_before_daily}
+              disabled={busy}
+              onChange={(event) => onSaveAutoCollectionSettings({ scan_before_daily: event.target.checked })}
+            />
+            <span>每日沉淀前扫描</span>
+          </label>
+        </div>
+        <div className="importMeta">
+          <span>待处理文件：{pendingCount}</span>
+          <span>已处理文件：{autoCollection.processed_file_count}</span>
+          <span>上次扫描：{formatOptionalTime(autoCollection.last_scan_at)}</span>
+        </div>
+      </div>
       <div className="sourceTable">
         {connectors.map((connector) => (
           <div className="sourceRow" key={connector.source_app}>
@@ -2548,6 +2713,13 @@ function LibraryPanel({
   const showRecentHighlight = focusAtomIds.length > 0 || recentlyApprovedIds.length > 0;
   const approvedCount = atoms.filter((item) => item.atom.review_status === "approved").length;
   const pendingCount = atoms.filter((item) => item.atom.review_status === "pending").length;
+  const hasFacetFilters = [
+    knowledge.facets.source_apps,
+    knowledge.facets.types,
+    knowledge.facets.projects,
+    knowledge.facets.tags,
+    knowledge.facets.statuses
+  ].some((items) => items.length > 1);
 
   useEffect(() => {
     if (focusAtomIds.length > 0) {
@@ -2599,30 +2771,42 @@ function LibraryPanel({
           </div>
         </div>
         <div className="filterBar">
-          <label className="filterField filterField--wide filterField--search">
+          <label className="filterField">
             <span className="filterLabel">搜索</span>
-            <span className="search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索标题、正文、证据、标签" /></span>
+            <span className="search"><Search size={16} /><input type="search" name="knowledge-query" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索标题、正文、证据、标签" /></span>
           </label>
-          <label className="filterField">
-            <span className="filterLabel"><Filter size={15} />来源</span>
-            <select value={sourceApp} onChange={(event) => setSourceApp(event.target.value)}><option value="">全部</option>{knowledge.facets.source_apps.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select>
-          </label>
-          <label className="filterField">
-            <span className="filterLabel"><Filter size={15} />类型</span>
-            <select value={type} onChange={(event) => setType(event.target.value)}><option value="">全部</option>{knowledge.facets.types.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select>
-          </label>
-          <label className="filterField">
-            <span className="filterLabel"><Filter size={15} />项目</span>
-            <select value={project} onChange={(event) => setProject(event.target.value)}><option value="">全部</option>{knowledge.facets.projects.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select>
-          </label>
-          <label className="filterField">
-            <span className="filterLabel"><Filter size={15} />标签</span>
-            <select value={tag} onChange={(event) => setTag(event.target.value)}><option value="">全部</option>{knowledge.facets.tags.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select>
-          </label>
-          <label className="filterField">
-            <span className="filterLabel"><Filter size={15} />状态</span>
-            <select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">全部</option>{knowledge.facets.statuses.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select>
-          </label>
+          {hasFacetFilters && <div className="facetFilters">
+            {knowledge.facets.source_apps.length > 1 && (
+              <label className="filterField">
+                <span className="filterLabel"><Filter size={15} />来源</span>
+                <select name="knowledge-source" value={sourceApp} onChange={(event) => setSourceApp(event.target.value)}><option value="">全部来源</option>{knowledge.facets.source_apps.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select>
+              </label>
+            )}
+            {knowledge.facets.types.length > 1 && (
+              <label className="filterField">
+                <span className="filterLabel"><Filter size={15} />类型</span>
+                <select name="knowledge-type" value={type} onChange={(event) => setType(event.target.value)}><option value="">全部类型</option>{knowledge.facets.types.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select>
+              </label>
+            )}
+            {knowledge.facets.projects.length > 1 && (
+              <label className="filterField">
+                <span className="filterLabel"><Filter size={15} />项目</span>
+                <select name="knowledge-project" value={project} onChange={(event) => setProject(event.target.value)}><option value="">全部项目</option>{knowledge.facets.projects.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select>
+              </label>
+            )}
+            {knowledge.facets.tags.length > 1 && (
+              <label className="filterField">
+                <span className="filterLabel"><Filter size={15} />标签</span>
+                <select name="knowledge-tag" value={tag} onChange={(event) => setTag(event.target.value)}><option value="">全部标签</option>{knowledge.facets.tags.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select>
+              </label>
+            )}
+            {knowledge.facets.statuses.length > 1 && (
+              <label className="filterField">
+                <span className="filterLabel"><Filter size={15} />状态</span>
+                <select name="knowledge-status" value={status} onChange={(event) => setStatus(event.target.value)}><option value="">全部状态</option>{knowledge.facets.statuses.map((item) => <option key={item.value} value={item.value}>{item.value} · {item.count}</option>)}</select>
+              </label>
+            )}
+          </div>}
         </div>
         <div className="libraryToolbar">
           <button className="secondary" onClick={onExport} disabled={busy || approvedCount === 0} title={approvedCount === 0 ? "暂无已批准知识可导出" : "将全部已批准知识导出为 Markdown 文件"}><Download size={16} />导出已批准 Markdown</button>
@@ -3763,6 +3947,10 @@ function toUserFacingError(error: unknown, fallback: string): string {
   }
 
   return normalized || fallback;
+}
+
+function formatOptionalTime(value: string): string {
+  return value ? new Date(value).toLocaleString() : "尚未扫描";
 }
 
 function titleFor(active: NavKey): string {

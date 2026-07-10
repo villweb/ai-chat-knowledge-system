@@ -1,5 +1,6 @@
 export * from "./core-engine";
 export * from "./ai-knowledge-extraction";
+export * from "./auto-source-collection";
 export * from "./commercial";
 export * from "./daily-automation";
 export * from "./knowledge-library";
