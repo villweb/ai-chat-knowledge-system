@@ -38,5 +38,8 @@ contextBridge.exposeInMainWorld("desktopApi", {
   skipAutomationRun: () => ipcRenderer.invoke("automation:skip-run"),
   rerunAutomationDate: (input) => ipcRenderer.invoke("automation:rerun-date", input),
   listAutomationHistory: () => ipcRenderer.invoke("automation:list-history"),
+  getAutoCollectionState: () => ipcRenderer.invoke("auto-collection:get-state"),
+  saveAutoCollectionSettings: (input) => ipcRenderer.invoke("auto-collection:save-settings", input),
+  runAutoCollectionNow: () => ipcRenderer.invoke("auto-collection:run-now"),
   saveSessionConfig: (input) => ipcRenderer.invoke("settings:save-session-config", input)
 });

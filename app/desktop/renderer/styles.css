@@ -1515,6 +1515,56 @@ nav {
   overflow: hidden;
 }
 
+.autoCollectionBox {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 14px;
+  border: 1px solid #dde5e1;
+  border-radius: 8px;
+  background: #f8faf9;
+}
+
+.autoCollectionHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.autoCollectionHeader strong,
+.autoCollectionHeader span {
+  display: block;
+}
+
+.autoCollectionHeader strong {
+  color: #2b6c42;
+}
+
+.autoCollectionHeader span {
+  margin-top: 4px;
+  color: #596862;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.autoCollectionGrid {
+  grid-template-columns: minmax(170px, 0.9fr) minmax(150px, 0.8fr) repeat(2, minmax(160px, 1fr));
+}
+
+.checkboxLabel {
+  align-content: center;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  min-height: 40px;
+}
+
+.checkboxLabel input {
+  width: 16px;
+  height: 16px;
+  accent-color: #23724f;
+}
+
 .sourceRow {
   display: grid;
   grid-template-columns: minmax(130px, 0.7fr) minmax(112px, 0.35fr) minmax(280px, 1.4fr);
@@ -2821,6 +2871,7 @@ nav {
 	  .privacyLayout,
 	  .commercialLayout,
 	  .privacyBoundaryGrid,
+	  .autoCollectionGrid,
 	  .formGrid {
 	    grid-template-columns: 1fr;
 	  }
